@@ -724,6 +724,8 @@ Folgende Konzepte aus E3DC-Control haben Maestro direkt inspiriert:
 
 Maestro überträgt diese Ideen in die Home-Assistant-Welt als native HACS-Integration mit Config Flow, Entitäten, Dashboard und deutlich erweiterter Logik (PV-Delay, Spreading, Vorausschauendes Laden, dynamische Tarife u.v.m.).
 
+Ebenfalls ein herzlicher Dank an **Torben Nehmer** für die [e3dc_rscp](https://github.com/torbennehmer/hacs-e3dc) Home Assistant Integration, auf der Maestro als Kommunikationsschicht vollständig aufbaut. Ohne diese Arbeit wäre Maestro nicht möglich.
+
 ---
 
 ## Lizenz
