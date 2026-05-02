@@ -1,0 +1,301 @@
+{
+  "config": {
+    "step": {
+      "sources": {
+        "title": "Quell-Entities",
+        "description": "Wähle die Sensor-Entities aus der E3DC RSCP Integration aus.",
+        "data": {
+          "soc_sensor": "Ladezustand (SoC)",
+          "pv_power_sensor": "PV-Leistung",
+          "additional_generation_sensor": "Zusätzliche Erzeugung",
+          "house_power_sensor": "Hausverbrauch",
+          "grid_power_sensor": "Netzleistung (positiv = Einspeisung)",
+          "battery_power_sensor": "Batterieleistung (positiv = Laden)",
+          "battery_charged_today_sensor": "Geladen heute (kWh, optional, z. B. RSCP-Tageswert)",
+          "battery_discharged_today_sensor": "Entladen heute (kWh, optional, z. B. RSCP-Tageswert)"
+        }
+      },
+      "system": {
+        "title": "Systemparameter",
+        "data": {
+          "inverter_power": "WR-Nennleistung (W)",
+          "max_charge_power": "Max. Ladeleistung (W)",
+          "min_charge_power": "Min. Ladeleistung (W)",
+          "installed_kwp": "Installierte PV-Leistung (kWp)",
+          "feed_in_limit_percent": "Einspeisegrenze (%)",
+          "update_interval": "Aktualisierungsintervall (s)",
+          "advanced_corridor": "Erweiterter Ladekorridor",
+          "lower_corridor": "Unterer Ladekorridor (W)",
+          "upper_corridor": "Oberer Ladekorridor (W)",
+          "soc_hysteresis_percent": "SoC-Hysterese (%)",
+          "charge_ramp_w_per_cycle": "Ladeleistungs-Anlauf (W/Zyklus)"
+        }
+      },
+      "season": {
+        "title": "Saison & Ladekorridor",
+        "data": {
+          "charge_threshold": "Ladeschwelle – Notfallladung unter x% SoC",
+          "charge_target": "Ladeende SoC (%)",
+          "winter_minimum_hour": "Ladeende Winterminimum (Stunde)",
+          "summer_maximum_hour": "Ladeende Sommermaximum (Stunde)",
+          "summer_charge_end": "Ziel-Ladeende im Sommer (Stunde)",
+          "seasonal_reserve_enabled": "Saisonale Notstromreserve aktivieren",
+          "reserve_winter_percent": "Reserve Winter (% SoC)",
+          "reserve_equinox_percent": "Reserve Äquinoktium (% SoC)",
+          "adaptive_reserve_enabled": "Verbrauchsadaptive Reserve aktivieren",
+          "adaptive_reserve_lookback_days": "Adaptive Reserve – Lookback (Tage)",
+          "adaptive_reserve_min_days": "Adaptive Reserve – Mindestdaten (Tage)",
+          "adaptive_reserve_safety_factor": "Adaptive Reserve – Sicherheitsfaktor"
+        }
+      },
+      "ht": {
+        "title": "HT/NT-Schutz",
+        "description": "Verhindert das Entladen im Hochtarif-Fenster.",
+        "data": {
+          "ht_enabled": "HT/NT-Schutz aktivieren",
+          "ht_on": "Hochtarif Beginn (Stunde, lokal)",
+          "ht_off": "Hochtarif Ende (Stunde, lokal)",
+          "ht_min": "Speicherreserve Winter (%)",
+          "ht_sockel": "Speicherreserve Äquinoktium (%)",
+          "ht_sat": "Hochtarif Samstag",
+          "ht_sun": "Hochtarif Sonntag"
+        }
+      },
+      "pv_forecast": {
+        "title": "PV-Prognose / Ladeverzögerung",
+        "description": "Verzögert die Ladung aus dem Korridor, wenn die heutige PV-Restprognose ausreicht um den Speicher zu füllen.",
+        "data": {
+          "pv_forecast_enabled": "PV-Prognose-Verzögerung aktivieren",
+          "pv_forecast_sensor": "Prognose-Sensor (verbleibende kWh heute)",
+          "pv_forecast_threshold_kwh": "Mindest-Prognose (kWh)",
+          "battery_capacity_kwh": "Nutzbare Batteriekapazität (kWh)",
+          "pv_forecast_safety_factor": "Sicherheitsfaktor (Prognose ≥ Bedarf × Faktor)",
+          "spreading_enabled": "Ladeverteilung aktivieren",
+          "spreading_target_soc": "Ziel-SoC für Ladeverteilung (%)"
+        }
+      },
+      "tariff": {
+        "title": "Dynamische Tarife",
+        "description": "Laden aus dem Netz bei günstigem Börsenstrom.",
+        "data": {
+          "dynamic_tariff_enabled": "Dynamische Tarife aktivieren",
+          "price_sensor": "Preis-Sensor (€/kWh)",
+          "cheap_threshold": "Günstig-Schwelle (€/kWh)",
+          "max_grid_charge_kwh": "Max. Netzladung pro Tag (kWh)"
+        }
+      },
+      "tariff_slots": {
+        "title": "Tarif-Slots",
+        "description": "Verwalte beliebig viele Tarif-Fenster (statt nur ein HT-Fenster).\n\nAktuell konfiguriert:\n{slots}\n\nKlassen: high = entladen sperren, low = Netzladung erlaubt, normal = neutral.",
+        "data": {
+          "action": "Aktion"
+        }
+      },
+      "tariff_slot_edit": {
+        "title": "Tarif-Slot bearbeiten",
+        "data": {
+          "weekdays": "Wochentage",
+          "start_h": "Beginn (Stunde, lokale Zeit)",
+          "end_h": "Ende (Stunde, lokale Zeit)",
+          "class_": "Klasse (high/low/normal)",
+          "min_reserve_soc": "Mindest-SoC-Reserve in % (optional)"
+        }
+      },
+      "wallbox": {
+        "title": "Wallbox",
+        "description": "Überschussladung für Elektrofahrzeuge.",
+        "data": {
+          "wallbox_enabled": "Wallbox-Regelung aktivieren",
+          "wallbox_type": "Wallbox-Typ",
+          "wallbox_min_current": "Minimalstrom (A)",
+          "wallbox_max_current": "Maximalstrom (A)",
+          "wallbox_phases": "Phasenanzahl",
+          "wallbox_min_surplus": "Mindest-PV-Überschuss (W)",
+          "wallbox_service_on": "Service: Laden starten",
+          "wallbox_service_off": "Service: Laden stoppen"
+        }
+      },
+      "evcc": {
+        "title": "EVCC-Integration",
+        "description": "Verbindet Maestro mit EVCC, openWB oder jeder anderen Wallbox-Steuerung. Maestro tritt zurück, sobald der konfigurierte Lade-Modus-Sensor den 'Sofortladen'-Wert meldet – die Wallbox kann dann das Netz nutzen.\n\nFunktioniert mit jeder Wallbox, die einen Sensor oder eine Select-Entität bereitstellt, der/die beim Modus 'Sofortladen' (o.ä.) einen definierten Wert liefert:\n• EVCC: Sensor mit Wert \"now\"\n• openWB: Sensor mit Wert \"Instant Charging\"\n• Andere Wallboxen: beliebiger Sensor/Select, solange der Sofortlade-Wert bekannt ist.",
+        "data": {
+          "evcc_enabled": "EVCC/openWB/Wallbox-Integration aktivieren",
+          "evcc_charging_entity": "Laden-aktiv Entity (optional, boolean/binary_sensor – z. B. openWB autoladestatus)",
+          "evcc_mode_entity": "Lade-Modus Entity (Sensor/Select mit Sofortlade-Wert – z. B. EVCC, openWB, andere)",
+          "evcc_now_value": "Wert für 'Sofortladen' (EVCC: \"now\", openWB: \"Instant Charging\", oder eigener Wert)"
+        }
+      },
+      "heatpump": {
+        "title": "Wärmepumpe",
+        "description": "Steuere die Wärmepumpe bei PV-Überschuss oder günstigem Strom.",
+        "data": {
+          "hp_enabled": "Wärmepumpen-Regelung aktivieren",
+          "hp_switch_entity": "Wärmepumpen-Schalter-Entity",
+          "hp_service_on": "Service: Wärmepumpe ein",
+          "hp_service_off": "Service: Wärmepumpe aus",
+          "hp_min_surplus": "Mindest-PV-Überschuss (W)",
+          "hp_max_price": "Max. Strompreis (€/kWh)",
+          "hp_time_start": "Tagesfenster Beginn",
+          "hp_time_end": "Tagesfenster Ende",
+          "hp_min_run_minutes": "Mindestlaufzeit (min)",
+          "hp_min_pause_minutes": "Mindestpause (min)"
+        }
+      },
+      "failsafe": {
+        "title": "Failsafe & Watchdog",
+        "data": {
+          "watchdog_timeout": "Watchdog-Timeout (min, 0 = deaktiviert)"
+        }
+      },
+      "flat_curve": {
+        "title": "F0: Morning-Cap & Schonladung",
+        "data": {
+          "morning_cap_enabled": "Morning-Cap aktivieren",
+          "morning_cap_soc": "SoC-Deckel (%)",
+          "morning_cap_until_h": "Aktiv bis (Uhr, lokal)",
+          "gentle_charge_enabled": "Schonladung aktivieren",
+          "gentle_charge_factor": "Schonladung Faktor (0.05–1.0)"
+        }
+      },
+      "auto_mode": {
+        "title": "F3: Auto-Optimierung",
+        "data": {
+          "auto_mode_enabled": "Auto-Optimierung aktivieren",
+          "auto_mode_objective": "Optimierungsziel"
+        }
+      }
+    },
+    "abort": {
+      "e3dc_rscp_not_configured": "E3DC Maestro benötigt die 'E3DC RSCP' Integration. Bitte zuerst konfigurieren."
+    }
+  },
+  "options": {
+    "step": {
+      "sources": { "title": "Quell-Entities" },
+      "system": { "title": "Systemparameter" },
+      "season": { "title": "Saison & Ladekorridor" },
+      "pv_forecast": { "title": "PV-Prognose / Ladeverzögerung" },
+      "ht": { "title": "HT/NT-Schutz" },
+      "tariff_slots": {
+        "title": "Tarif-Slots",
+        "description": "Aktuell konfiguriert:\n{slots}"
+      },
+      "tariff_slot_edit": {
+        "title": "Tarif-Slot bearbeiten"
+      },
+      "tariff": { "title": "Dynamische Tarife" },
+      "wallbox": { "title": "Wallbox" },
+      "evcc": {
+        "title": "EVCC-Integration",
+        "description": "Verbindet Maestro mit EVCC, openWB oder jeder anderen Wallbox-Steuerung. Maestro tritt zur\u00fcck, sobald der konfigurierte Lade-Modus-Sensor den 'Sofortladen'-Wert meldet.\n\nUnterst\u00fctzte Systeme:\n\u2022 EVCC: Sensor mit Wert \"now\"\n\u2022 openWB: Sensor mit Wert \"Instant Charging\"\n\u2022 Andere Wallboxen: beliebiger Sensor/Select, der beim Sofortladen einen bekannten Wert liefert.",
+        "data": {
+          "evcc_enabled": "EVCC/openWB/Wallbox-Integration aktivieren",
+          "evcc_charging_entity": "Laden-aktiv Entity (optional, boolean/binary_sensor)",
+          "evcc_mode_entity": "Lade-Modus Entity (Sensor/Select mit Sofortlade-Wert)",
+          "evcc_now_value": "Wert f\u00fcr 'Sofortladen' (EVCC: \"now\", openWB: \"Instant Charging\")"
+        }
+      },
+      "heatpump": { "title": "Wärmepumpe" },
+      "failsafe": { "title": "Failsafe & Watchdog" },
+      "flat_curve": { "title": "F0: Morning-Cap & Schonladung" },
+      "auto_mode": { "title": "F3: Auto-Optimierung" }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "phase": {
+        "name": "Regelphase",
+        "state": {
+          "off": "Aus",
+          "manual": "Manuell",
+          "emergency": "Notfallladung",
+          "feed_in_limit": "Einspeisedrosselung",
+          "reserve_protection": "Notstromreserve aktiv",
+          "evcc_pause": "EVCC Now-Modus",
+          "ht_protection": "HT-Schutz",
+          "corridor": "Ladekorridor",
+          "pv_delay": "PV-Prognose Verzögerung",
+          "spreading": "Ladeverteilung",
+          "curtailment_guard": "Abregelschutz",
+          "morning_discharge": "Morgen-Vorentladung",
+          "astro_wait": "Astro-Modus: Warten auf Sonne",
+          "morning_cap": "Morning-Cap (SoC-Deckel)",
+          "idle": "Bereitschaft"
+        }
+      },
+      "target_charge_power": { "name": "Ziel-Ladeleistung" },
+      "target_soc": { "name": "Ziel-SoC" },
+      "last_action": { "name": "Letzte Aktion" },
+      "charged_today": { "name": "Geladen heute" },
+      "discharged_today": { "name": "Entladen heute" },
+      "feed_in_interventions": { "name": "Einspeise-Eingriffe heute" },
+      "debug_log": { "name": "Debug-Log" },
+      "autonomy_time": { "name": "Autonomiezeit" },
+      "seasonal_reserve_soc": { "name": "Notstromreserve (aktuell)" },
+      "adaptive_reserve_soc": { "name": "Notstromreserve (adaptiv)" },
+      "adaptive_ht_reserve_soc": { "name": "HT-Reserve (adaptiv)" },
+      "curtailment_avoided_today": { "name": "Abregelung verhindert heute" },
+      "seasonal_charge_end": { "name": "Saisonales Ladeende (Uhrzeit)" },
+      "forecast_min_soc": { "name": "Forecast: Min-SoC n\u00e4chste 24h" },
+      "forecast_max_soc": { "name": "Forecast: Max-SoC n\u00e4chste 24h" },
+      "forecast_grid_draw_kwh": { "name": "Forecast: Netzbezug n\u00e4chste 24h" },
+      "forecast_self_sufficiency": { "name": "Forecast: Autarkie n\u00e4chste 24h" },
+      "forecast_trajectory": { "name": "Forecast: SoC-Trajektorie 24h" },
+      "forecast_data_quality": { "name": "Forecast: Datenqualit\u00e4t" },
+      "auto_active_strategy": { "name": "Auto: Aktive Strategie" },
+      "auto_estimated_savings": { "name": "Auto: Gesch\u00e4tzte Einsparung" }
+    },
+    "binary_sensor": {
+      "e3dc_reachable": { "name": "E3DC erreichbar" },
+      "feed_in_limit_active": { "name": "Einspeisedrosselung aktiv" },
+      "ht_protection_active": { "name": "HT-Schutz aktiv" },
+      "emergency_charge_active": { "name": "Notfallladung aktiv" },
+      "curtailment_guard_active": { "name": "Abregelschutz aktiv" }
+    },
+    "switch": {
+      "regelung_aktiv": { "name": "Regelung aktiv" },
+      "force_discharge": { "name": "Erzwungene Entladung" },
+      "ht_enabled": { "name": "HT/NT-Schutz" },
+      "ht_sat": { "name": "HT Samstag" },
+      "ht_sun": { "name": "HT Sonntag" },
+      "wallbox_enabled": { "name": "Wallbox-Regelung" },
+      "hp_enabled": { "name": "Wärmepumpen-Regelung" },
+      "debug": { "name": "Debug-Logging" },
+      "seasonal_reserve_enabled": { "name": "Saisonale Notstromreserve" },
+      "adaptive_reserve_enabled": { "name": "Adaptive Reserve (Verbrauchsmittel)" },
+      "evcc_enabled": { "name": "EVCC-Integration" },
+      "curtailment_guard_enabled": { "name": "Abregelschutz" },
+      "lower_corridor_pause_enabled": { "name": "Korridor-Pause (min. Ladeleistung)" },
+      "two_tier_enabled": { "name": "Spät-Ladung (Two-Tier)" },
+      "pre_discharge_tibber_auto": { "name": "Vorentladung Tibber-Auto" },
+      "astro_enabled": { "name": "Astro-Modus (Sonnenüberwachung)" },
+      "morning_cap_enabled": { "name": "Morning-Cap (SoC-Deckel morgens)" },
+      "gentle_charge_enabled": { "name": "Schonladung (reduzierte Ladeleistung)" },
+      "auto_mode_enabled": { "name": "Auto-Optimierung" }
+    },
+    "select": {
+      "wallbox_type": { "name": "Wallbox-Typ" },
+      "morning_discharge_mode": { "name": "Vorentladungs-Modus" }
+    },
+    "number": {
+      "morning_unload_soc": { "name": "Vorentladungs-Ziel SoC" },
+      "morning_unload_start_soc": { "name": "Vorentladungs-Einschwelle SoC" },
+      "pre_discharge_offset_h": { "name": "Vorentladungs-Offset (Stunden vor Ladestart)" },
+      "pre_discharge_max_power_w": { "name": "Vorentladungs-Max. Leistung" },
+      "force_discharge_power_w": { "name": "Erzwungene Entladungsleistung" },
+      "morning_grid_export_threshold": { "name": "Tibber-Schwelle für Netzexport" },
+      "astro_latitude": { "name": "Breitengrad" },
+      "astro_longitude": { "name": "Längengrad" },
+      "charge_end_sunset_offset_h": { "name": "Ladeende Offset zu Sonnenuntergang" },
+      "charge_start_sunrise_offset_h": { "name": "Ladestart Offset nach Sonnenaufgang" },
+      "morning_cap_soc": { "name": "Morning-Cap SoC-Grenze" },
+      "morning_cap_until_h": { "name": "Morning-Cap aktiv bis (Uhr, lokal)" },
+      "gentle_charge_factor": { "name": "Schonladung Faktor" }
+    },
+    "button": {
+      "clear_limits": { "name": "Limits jetzt freigeben" },
+      "manual_charge": { "name": "Manuell laden (3 kWh)" },
+      "reset_stats": { "name": "Statistik zurücksetzen" }
+    }
+  }
+}

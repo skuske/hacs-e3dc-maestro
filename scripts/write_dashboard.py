@@ -1,0 +1,2159 @@
+#!/usr/bin/env python3
+"""Generates dashboards/maestro_dashboard.yaml.
+
+Usage (from project root):
+    python3 scripts/write_dashboard.py
+"""
+import pathlib
+
+
+# ─── helpers ──────────────────────────────────────────────────────────────────
+
+def _ind(text: str, n: int) -> str:
+    """Indent every line of *text* by *n* spaces."""
+    pad = " " * n
+    return "\n".join(pad + l for l in text.splitlines())
+
+
+def entity_row(entity: str, name: str) -> str:
+    """Single entity row for use inside an entities card."""
+    return (
+        f"          - entity: {entity}\n"
+        f"            name: \"{name}\"\n"
+    )
+
+
+def help_btn(path: str) -> str:
+    """Help button row to append as last item inside an entities card."""
+    return (
+        "          - type: button\n"
+        "            name: \"\u2139\ufe0f  Hilfe zu diesem Abschnitt\"\n"
+        "            icon: mdi:help-circle-outline\n"
+        "            tap_action:\n"
+        "              action: navigate\n"
+        f"              navigation_path: /e3dc-maestro/{path}\n"
+    )
+
+
+def help_subview(path: str, title: str, content: str) -> str:
+    return (
+        f'  - title: "{title}"\n'
+        f"    path: {path}\n"
+        "    subview: true\n"
+        "    cards:\n"
+        "      - type: markdown\n"
+        "        content: |\n"
+        + _ind(content, 10) + "\n\n"
+    )
+
+
+# ─── Tab 1: Dashboard (unverändert) ──────────────────────────────────────────
+
+TAB_1 = """\
+  - title: Dashboard
+    icon: mdi:view-dashboard
+    path: uebersicht
+    cards:
+
+      - type: custom:mushroom-title-card
+        title: E3DC Maestro
+        subtitle: Echtzeit-Übersicht
+
+      - type: custom:mushroom-chips-card
+        chips:
+          - type: template
+            content: Regelung
+            icon: mdi:power
+            icon_color: "{{ 'green' if is_state('switch.e3dc_maestro_regelung_aktiv', 'on') else 'red' }}"
+            entity: switch.e3dc_maestro_regelung_aktiv
+            tap_action:
+              action: toggle
+          - type: template
+            content: Entladung
+            icon: mdi:battery-arrow-down
+            icon_color: "{{ 'orange' if is_state('switch.e3dc_maestro_erzwungene_entladung', 'on') else 'grey' }}"
+            entity: switch.e3dc_maestro_erzwungene_entladung
+            tap_action:
+              action: toggle
+            hold_action:
+              action: more-info
+          - type: template
+            content: E3DC
+            icon: mdi:check-network
+            icon_color: "{{ 'green' if is_state('binary_sensor.e3dc_maestro_e3dc_erreichbar', 'on') else 'red' }}"
+            entity: binary_sensor.e3dc_maestro_e3dc_erreichbar
+            tap_action:
+              action: more-info
+          - type: template
+            content: Notfall
+            icon: mdi:battery-alert
+            icon_color: "{{ 'red' if is_state('binary_sensor.e3dc_maestro_notfallladung_aktiv', 'on') else 'grey' }}"
+            entity: binary_sensor.e3dc_maestro_notfallladung_aktiv
+            tap_action:
+              action: more-info
+          - type: template
+            content: Abregelschutz
+            icon: mdi:shield-alert
+            icon_color: "{{ 'amber' if is_state('binary_sensor.e3dc_maestro_abregelschutz_aktiv', 'on') else 'grey' }}"
+            entity: binary_sensor.e3dc_maestro_abregelschutz_aktiv
+            tap_action:
+              action: more-info
+          - type: template
+            content: HT-Schutz
+            icon: mdi:clock-alert
+            icon_color: "{{ 'deep-orange' if is_state('binary_sensor.e3dc_maestro_ht_schutz_aktiv', 'on') else 'grey' }}"
+            entity: binary_sensor.e3dc_maestro_ht_schutz_aktiv
+            tap_action:
+              action: more-info
+          - type: template
+            content: Drosselung
+            icon: mdi:transmission-tower-off
+            icon_color: "{{ 'orange' if is_state('binary_sensor.e3dc_maestro_einspeisedrosselung_aktiv', 'on') else 'grey' }}"
+            entity: binary_sensor.e3dc_maestro_einspeisedrosselung_aktiv
+            tap_action:
+              action: more-info
+
+      - type: custom:mushroom-template-card
+        primary: "{{ states('sensor.e3dc_maestro_regelphase') }}"
+        secondary: Aktuelle Regelphase
+        icon: mdi:state-machine
+        icon_color: >
+          {% set p = states('sensor.e3dc_maestro_regelphase') %}
+          {% if p == 'emergency' %} red
+          {% elif p == 'feed_in_limit' %} orange
+          {% elif p == 'force_discharge' %} deep-orange
+          {% elif p == 'corridor' %} green
+          {% elif p == 'spreading' %} teal
+          {% elif p == 'curtailment_guard' %} amber
+          {% elif p == 'ht_protection' %} deep-orange
+          {% elif p == 'reserve_protection' %} blue
+          {% elif p == 'evcc_pause' %} purple
+          {% elif p == 'pv_delay' %} light-green
+          {% else %} grey
+          {% endif %}
+        layout: horizontal
+        tap_action:
+          action: more-info
+          entity: sensor.e3dc_maestro_regelphase
+
+      - type: custom:mushroom-entity-card
+        entity: sensor.e3dc_maestro_letzte_aktion
+        name: Letzte Aktion
+        icon: mdi:history
+        icon_color: blue-grey
+        layout: horizontal
+        tap_action:
+          action: more-info
+
+      - type: vertical-stack
+        cards:
+          - type: entities
+            title: Manuelle Steuerung
+            show_header_toggle: false
+            entities:
+              - entity: switch.e3dc_maestro_regelung_aktiv
+                name: "Regelung aktiv"
+              - entity: switch.e3dc_maestro_erzwungene_entladung
+                name: "Erzwungene Entladung"
+                secondary_info: last-changed
+          - type: custom:mushroom-number-card
+            entity: number.e3dc_maestro_erzwungene_entladungsleistung
+            name: Entladeleistung
+            icon: mdi:battery-arrow-down
+            display_mode: slider
+            layout: horizontal
+
+      - type: grid
+        columns: 2
+        square: false
+        cards:
+          - type: custom:mushroom-entity-card
+            entity: sensor.e3dc_maestro_ziel_ladeleistung
+            name: Ziel-Ladeleistung
+            icon: mdi:lightning-bolt
+            icon_color: orange
+            tap_action:
+              action: more-info
+          - type: custom:mushroom-entity-card
+            entity: sensor.e3dc_maestro_ziel_soc
+            name: Ziel-SoC
+            icon: mdi:battery-charging
+            icon_color: green
+            tap_action:
+              action: more-info
+          - type: custom:mushroom-entity-card
+            entity: sensor.e3dc_maestro_autonomiezeit
+            name: Autonomiezeit
+            icon: mdi:timer-outline
+            icon_color: blue
+            tap_action:
+              action: more-info
+          - type: custom:mushroom-entity-card
+            entity: sensor.e3dc_maestro_saisonales_ladeende_stunde
+            name: Ladeende heute
+            icon: mdi:clock-end
+            icon_color: purple
+            tap_action:
+              action: more-info
+
+      - type: grid
+        columns: 2
+        square: false
+        cards:
+          - type: custom:mushroom-entity-card
+            entity: sensor.e3dc_maestro_geladen_heute
+            name: Geladen heute
+            icon: mdi:battery-plus
+            icon_color: green
+            tap_action:
+              action: more-info
+          - type: custom:mushroom-entity-card
+            entity: sensor.e3dc_maestro_entladen_heute
+            name: Entladen heute
+            icon: mdi:battery-minus
+            icon_color: deep-orange
+            tap_action:
+              action: more-info
+          - type: custom:mushroom-entity-card
+            entity: sensor.e3dc_maestro_abregelung_verhindert_heute
+            name: Abregelung verhindert
+            icon: mdi:shield-check
+            icon_color: teal
+            tap_action:
+              action: more-info
+          - type: custom:mushroom-entity-card
+            entity: sensor.e3dc_maestro_einspeise_eingriffe_heute
+            name: Einspeise-Eingriffe
+            icon: mdi:transmission-tower
+            icon_color: indigo
+            tap_action:
+              action: more-info
+
+      - type: vertical-stack
+        cards:
+          - type: custom:mushroom-title-card
+            title: Morgen-Prognose
+            subtitle: Vorausschauendes Laden & PV-Erwartung
+          - type: grid
+            columns: 3
+            square: false
+            cards:
+              - type: custom:mushroom-template-card
+                primary: >
+                  {{ states('sensor.e3dc_maestro_vorausschauendes_ladeziel') | default('–') }} %
+                secondary: Ladeziel morgen
+                icon: mdi:battery-charging-high
+                icon_color: >
+                  {% set v = states('sensor.e3dc_maestro_vorausschauendes_ladeziel') | float(-1) %}
+                  {% if v < 0 %} grey
+                  {% elif v >= 90 %} red
+                  {% elif v >= 75 %} orange
+                  {% else %} green
+                  {% endif %}
+                layout: vertical
+                tap_action:
+                  action: more-info
+                  entity: sensor.e3dc_maestro_vorausschauendes_ladeziel
+              - type: custom:mushroom-template-card
+                primary: >
+                  {{ states('sensor.e3dc_maestro_morgen_pv_prognose') | default('–') }} kWh
+                secondary: PV morgen
+                icon: mdi:weather-sunny
+                icon_color: >
+                  {% set v = states('sensor.e3dc_maestro_morgen_pv_prognose') | float(-1) %}
+                  {% if v < 0 %} grey
+                  {% elif v >= 10 %} green
+                  {% elif v >= 5 %} amber
+                  {% else %} red
+                  {% endif %}
+                layout: vertical
+                tap_action:
+                  action: more-info
+                  entity: sensor.e3dc_maestro_morgen_pv_prognose
+              - type: custom:mushroom-template-card
+                primary: >
+                  {{ states('sensor.e3dc_maestro_morgen_energiedefizit') | default('–') }} kWh
+                secondary: Defizit morgen
+                icon: >
+                  {% if states('sensor.e3dc_maestro_morgen_energiedefizit') | float(0) > 0 %}
+                    mdi:transmission-tower-import
+                  {% else %}
+                    mdi:check-circle
+                  {% endif %}
+                icon_color: >
+                  {% set v = states('sensor.e3dc_maestro_morgen_energiedefizit') | float(-1) %}
+                  {% if v < 0 %} grey
+                  {% elif v == 0 %} green
+                  {% elif v < 3 %} amber
+                  {% else %} red
+                  {% endif %}
+                layout: vertical
+                tap_action:
+                  action: more-info
+                  entity: sensor.e3dc_maestro_morgen_energiedefizit
+
+      - type: history-graph
+        title: Regelphase (24 h)
+        hours_to_show: 24
+        entities:
+          - entity: sensor.e3dc_maestro_regelphase
+            name: Phase
+
+      - type: history-graph
+        title: Tagesstatistik (24 h)
+        hours_to_show: 24
+        entities:
+          - entity: sensor.e3dc_maestro_geladen_heute
+            name: Geladen (kWh)
+          - entity: sensor.e3dc_maestro_entladen_heute
+            name: Entladen (kWh)
+          - entity: sensor.e3dc_maestro_abregelung_verhindert_heute
+            name: Abregelung verhindert (kWh)
+
+      - type: custom:mushroom-title-card
+        title: 24h SoC-Prognose
+        subtitle: "Benötigt aktivierten Forecast-Sensor (min. 7 Tage Verbrauchsdaten)"
+
+      - type: custom:mushroom-chips-card
+        chips:
+          - type: template
+            content: >
+              Min: {{ state_attr('sensor.e3dc_maestro_forecast_soc_trajektorie_24h', 'min_soc') | default('–') }} %
+            icon: mdi:battery-arrow-down-outline
+            icon_color: orange
+          - type: template
+            content: >
+              Max: {{ state_attr('sensor.e3dc_maestro_forecast_soc_trajektorie_24h', 'max_soc') | default('–') }} %
+            icon: mdi:battery-arrow-up-outline
+            icon_color: green
+          - type: template
+            content: >
+              Grid: {{ state_attr('sensor.e3dc_maestro_forecast_soc_trajektorie_24h', 'grid_draw_kwh') | default('–') }} kWh
+            icon: mdi:transmission-tower-import
+            icon_color: red
+          - type: template
+            content: >
+              Autarkie: {{ state_attr('sensor.e3dc_maestro_forecast_soc_trajektorie_24h', 'self_sufficiency_pct') | default('–') }} %
+            icon: mdi:solar-panel
+            icon_color: amber
+
+      - type: custom:apexcharts-card
+        chart_type: line
+        graph_span: 24h
+        span:
+          start: hour
+          offset: +1h
+        header:
+          title: Prognose SoC nächste 24h
+          show: true
+        apex_config:
+          chart:
+            height: 200
+          yaxis:
+            min: 0
+            max: 100
+          xaxis:
+            type: datetime
+            labels:
+              datetimeUTC: false
+              format: HH:mm
+        series:
+          - entity: sensor.e3dc_maestro_forecast_soc_trajektorie_24h
+            name: SoC-Prognose
+            unit: "%"
+            data_generator: |
+              return entity.attributes.trajectory_points || [];
+
+"""
+
+# ─── Tab 2: Laden ────────────────────────────────────────────────────────────
+
+TAB_2 = (
+    """\
+  - title: Laden
+    icon: mdi:battery-charging-outline
+    path: laden
+    cards:
+
+      - type: custom:mushroom-title-card
+        title: Ladestrategie & Optimierung
+
+      - type: custom:mushroom-chips-card
+        chips:
+          - type: template
+            content: Abregelschutz
+            icon: mdi:shield
+            icon_color: "{{ 'amber' if is_state('switch.e3dc_maestro_abregelschutz', 'on') else 'grey' }}"
+            entity: switch.e3dc_maestro_abregelschutz
+            tap_action:
+              action: toggle
+          - type: template
+            content: Spreading
+            icon: mdi:chart-timeline-variant
+            icon_color: "{{ 'teal' if is_state('switch.e3dc_maestro_ladeverteilung_spreading', 'on') else 'grey' }}"
+            entity: switch.e3dc_maestro_ladeverteilung_spreading
+            tap_action:
+              action: toggle
+          - type: template
+            content: Korridor-Pause
+            icon: mdi:pause-circle
+            icon_color: "{{ 'blue' if is_state('switch.e3dc_maestro_korridor_pause_min_ladeleistung', 'on') else 'grey' }}"
+            entity: switch.e3dc_maestro_korridor_pause_min_ladeleistung
+            tap_action:
+              action: toggle
+          - type: template
+            content: Two-Tier
+            icon: mdi:sort-clock-descending
+            icon_color: "{{ 'purple' if is_state('switch.e3dc_maestro_spat_ladung_two_tier', 'on') else 'grey' }}"
+            entity: switch.e3dc_maestro_spat_ladung_two_tier
+            tap_action:
+              action: toggle
+          - type: template
+            content: Notstromreserve
+            icon: mdi:battery-heart
+            icon_color: "{{ 'green' if is_state('switch.e3dc_maestro_saisonale_notstromreserve', 'on') else 'grey' }}"
+            entity: switch.e3dc_maestro_saisonale_notstromreserve
+            tap_action:
+              action: toggle
+
+      - type: entities
+        title: Ladekorridor
+        subtitle: Saisonale SoC-Rampe bis zum Tagesziel
+        entities:
+"""
+    + entity_row("number.e3dc_maestro_ladeschwelle",        "Ladeschwelle / Notfall (%)")
+    + entity_row("number.e3dc_maestro_ladeende_soc",        "Ladeende SoC (%)")
+    + entity_row("number.e3dc_maestro_ladeende_winter",     "Ladeende Winter (Stunde, lokal) — nur ohne Astro")
+    + entity_row("number.e3dc_maestro_ladeende_sommer",     "Ladeende Sommer (Stunde, lokal) — nur ohne Astro")
+    + entity_row("number.e3dc_maestro_sommerladeende_ziel", "Ziel-Ladeende Sommer (Stunde, lokal)")
+    + help_btn("help-ladekorridor")
+    + """\
+
+      - type: entities
+        title: Ladeverteilung (Spreading)
+        entities:
+          - entity: switch.e3dc_maestro_ladeverteilung_spreading
+            name: Spreading aktiv
+"""
+    + entity_row("number.e3dc_maestro_spreading_ziel_soc", "Spreading-Ziel SoC (%)")
+    + help_btn("help-spreading")
+    + """\
+
+      - type: entities
+        title: Abregelschutz (Curtailment Guard)
+        entities:
+          - entity: switch.e3dc_maestro_abregelschutz
+            name: Abregelschutz aktiv
+          - entity: binary_sensor.e3dc_maestro_abregelschutz_aktiv
+            name: Aktuell aktiv
+"""
+    + entity_row("number.e3dc_maestro_abregelschutz_einschaltschwelle", "Einschaltschwelle (W)")
+    + entity_row("number.e3dc_maestro_abregelschutz_ausschaltschwelle", "Ausschaltschwelle (W)")
+    + help_btn("help-curtailment")
+    + """\
+
+      - type: entities
+        title: Spät-Ladung (Two-Tier)
+        entities:
+          - entity: switch.e3dc_maestro_spat_ladung_two_tier
+            name: Spät-Ladung aktiv
+"""
+    + entity_row("number.e3dc_maestro_spatziel_soc",         "Spätziel SoC (%)")
+    + entity_row("number.e3dc_maestro_spat_ladeende_stunde", "Spät-Ladeende (Stunde, lokal)")
+    + help_btn("help-two-tier")
+    + "\n"
+)
+
+# ─── Tab 3: Zeitplanung ───────────────────────────────────────────────────────
+
+TAB_3 = (
+    """\
+  - title: Zeitplanung
+    icon: mdi:calendar-clock
+    path: zeitplanung
+    cards:
+
+      - type: custom:mushroom-title-card
+        title: Saisonales Ladeende & Astro-Modus
+
+      - type: grid
+        columns: 2
+        square: false
+        cards:
+          - type: custom:mushroom-entity-card
+            entity: sensor.e3dc_maestro_saisonales_ladeende_stunde
+            name: Ladeende heute
+            icon: mdi:clock-end
+            icon_color: purple
+            layout: vertical
+            tap_action:
+              action: more-info
+          - type: custom:mushroom-entity-card
+            entity: sensor.e3dc_maestro_astro_ladestart_uhrzeit
+            name: Ladestart heute
+            icon: mdi:clock-start
+            icon_color: amber
+            layout: vertical
+            tap_action:
+              action: more-info
+          - type: custom:mushroom-entity-card
+            entity: sensor.e3dc_maestro_ladeende_morgen_prognose
+            name: Ladeende morgen
+            icon: mdi:clock-end
+            icon_color: deep-purple
+            layout: vertical
+            tap_action:
+              action: more-info
+          - type: custom:mushroom-entity-card
+            entity: sensor.e3dc_maestro_ladestart_morgen_prognose
+            name: Ladestart morgen
+            icon: mdi:clock-start
+            icon_color: orange
+            layout: vertical
+            tap_action:
+              action: more-info
+
+      - type: entities
+        title: Astro-Modus (Phase 7)
+        entities:
+          - entity: switch.e3dc_maestro_astro_modus_sonnenuberwachung
+            name: Astro-Modus aktiv
+"""
+    + entity_row("number.e3dc_maestro_ladeende_offset_zu_sonnenuntergang",  "Offset zu Sonnenuntergang (h)")
+    + entity_row("number.e3dc_maestro_ladestart_offset_nach_sonnenaufgang", "Offset nach Sonnenaufgang (h)")
+    + help_btn("help-astro")
+    + """\
+
+      - type: markdown
+        content: >
+          **Standort:** Wird automatisch aus den Home Assistant Systemeinstellungen
+          übernommen (*Einstellungen → System → Allgemein*).
+
+"""
+)
+
+# ─── Tab 4: Netz & Tarif ─────────────────────────────────────────────────────
+
+TAB_4 = (
+    """\
+  - title: Netz & Tarif
+    icon: mdi:transmission-tower
+    path: tarif
+    cards:
+
+      - type: custom:mushroom-title-card
+        title: HT/NT-Schutz & Dynamischer Tarif
+
+      - type: custom:mushroom-chips-card
+        chips:
+          - type: template
+            content: HT/NT-Schutz
+            icon: mdi:clock-alert
+            icon_color: "{{ 'deep-orange' if is_state('switch.e3dc_maestro_ht_nt_schutz', 'on') else 'grey' }}"
+            entity: switch.e3dc_maestro_ht_nt_schutz
+            tap_action:
+              action: toggle
+          - type: template
+            content: HT aktiv
+            icon: mdi:clock-check
+            icon_color: "{{ 'red' if is_state('binary_sensor.e3dc_maestro_ht_schutz_aktiv', 'on') else 'grey' }}"
+            entity: binary_sensor.e3dc_maestro_ht_schutz_aktiv
+            tap_action:
+              action: more-info
+
+      - type: entities
+        title: Hochtarif-Schutz
+        entities:
+          - entity: switch.e3dc_maestro_ht_nt_schutz
+            name: HT/NT-Schutz aktiv
+          - entity: switch.e3dc_maestro_ht_samstag
+            name: Samstag wie HT
+          - entity: switch.e3dc_maestro_ht_sonntag
+            name: Sonntag wie HT
+          - entity: binary_sensor.e3dc_maestro_ht_schutz_aktiv
+            name: HT-Schutz – aktuell aktiv
+"""
+    + entity_row("number.e3dc_maestro_ht_beginn",             "HT Beginn (Stunde, lokal)")
+    + entity_row("number.e3dc_maestro_ht_ende",               "HT Ende (Stunde, lokal)")
+    + entity_row("number.e3dc_maestro_ht_reserve_winter",     "HT-Reserve Winter (%)")
+    + entity_row("number.e3dc_maestro_ht_sockel_aquinoktium", "HT-Reserve Äquinoktium (%)")
+    + help_btn("help-ht")
+    + """\
+
+      - type: entities
+        title: Dynamischer Tarif
+        subtitle: Netzladung bei günstigem Preis
+        entities:
+"""
+    + entity_row("number.e3dc_maestro_gunstig_schwelle",   "Günstig-Schwelle (€/kWh)")
+    + entity_row("number.e3dc_maestro_max_netzladung_tag", "Max. Netzladung/Tag (kWh)")
+    + help_btn("help-tarif")
+    + """\
+
+      - type: entities
+        title: Tarif-Slots
+        subtitle: Flexible Tarif-Fenster – via Options Flow konfigurieren
+        entities:
+          - entity: switch.e3dc_maestro_ht_nt_schutz
+            name: HT-Schutz aktiv (Legacy-Schnellzugriff)
+          - entity: binary_sensor.e3dc_maestro_ht_schutz_aktiv
+            name: HT-Schutz aktuell aktiv
+"""
+    + help_btn("help-tariff-slots")
+    + """\
+
+      - type: markdown
+        content: >
+          **Tarif-Slots konfigurieren:** Über *Einstellungen → Integrationen →
+          E3DC Maestro → Konfigurieren → Tarif-Slots* lassen sich beliebig viele
+          Fenster (Wochentage, Uhrzeit, Klasse) anlegen.
+          Klassen: `high` = kein Entladen, `low` = Netzladung erlaubt, `normal` = neutral.
+
+"""
+)
+
+# ─── Tab 5: Flexibilität ──────────────────────────────────────────────────────
+
+TAB_5 = (
+    """\
+  - title: Flexibilität
+    icon: mdi:home-lightning-bolt
+    path: flexibilitaet
+    cards:
+
+      - type: custom:mushroom-title-card
+        title: Wallbox, Wärmepumpe & Vorentladung
+
+      - type: custom:mushroom-chips-card
+        chips:
+          - type: template
+            content: EVCC
+            icon: mdi:ev-plug-type2
+            icon_color: "{{ 'purple' if is_state('switch.e3dc_maestro_evcc_integration', 'on') else 'grey' }}"
+            entity: switch.e3dc_maestro_evcc_integration
+            tap_action:
+              action: toggle
+          - type: template
+            content: Wallbox
+            icon: mdi:car-electric
+            icon_color: "{{ 'green' if is_state('switch.e3dc_maestro_wallbox_regelung', 'on') else 'grey' }}"
+            entity: switch.e3dc_maestro_wallbox_regelung
+            tap_action:
+              action: toggle
+          - type: template
+            content: Wärmepumpe
+            icon: mdi:heat-pump
+            icon_color: "{{ 'orange' if is_state('switch.e3dc_maestro_warmepumpen_regelung', 'on') else 'grey' }}"
+            entity: switch.e3dc_maestro_warmepumpen_regelung
+            tap_action:
+              action: toggle
+
+      - type: entities
+        title: EVCC – Akku-Entladesperre bei Sofortladen
+        subtitle: Schützt den Hausakku, wenn das Auto im Sofortlade-Modus lädt
+        entities:
+          - entity: switch.e3dc_maestro_evcc_integration
+            name: EVCC-Integration aktiv
+"""
+    + entity_row("number.e3dc_maestro_evcc_now_modus_entladungslimit", "Akku-Entladungslimit im Now-Modus (W)")
+    + help_btn("help-evcc")
+    + """\
+
+      - type: entities
+        title: Wallbox-Überschussregelung
+        subtitle: Steuert den Ladestrom der Wallbox bei PV-Überschuss
+        entities:
+          - entity: switch.e3dc_maestro_wallbox_regelung
+            name: Wallbox-Regelung aktiv
+"""
+    + entity_row("number.e3dc_maestro_wallbox_min_strom",          "Min-Strom (A)")
+    + entity_row("number.e3dc_maestro_wallbox_max_strom",          "Max-Strom (A)")
+    + entity_row("number.e3dc_maestro_wallbox_mindest_uberschuss", "Mindest-Überschuss (W)")
+    + help_btn("help-wallbox")
+    + """\
+
+      - type: entities
+        title: Wärmepumpe
+        entities:
+          - entity: switch.e3dc_maestro_warmepumpen_regelung
+            name: Wärmepumpe aktiv
+"""
+    + entity_row("number.e3dc_maestro_wp_mindest_uberschuss", "Mindest-Überschuss (W)")
+    + entity_row("number.e3dc_maestro_wp_max_preis",          "Max-Preis (€/kWh)")
+    + entity_row("number.e3dc_maestro_wp_mindestlaufzeit",    "Mindestlaufzeit (min)")
+    + entity_row("number.e3dc_maestro_wp_mindestpause",       "Mindestpause (min)")
+    + help_btn("help-wp")
+    + """\
+
+      - type: entities
+        title: Morgen-Vorentladung (Phase 6)
+        subtitle: Akku vorab entladen für mehr PV-Aufnahme
+        entities:
+"""
+    + entity_row("select.e3dc_maestro_vorentladungs_modus",                        "Vorentladungs-Modus")
+    + entity_row("number.e3dc_maestro_vorentladungs_ziel_soc",                     "Entlade-Ziel SoC (%)")
+    + entity_row("number.e3dc_maestro_vorentladungs_einschwelle_soc",              "Einschalt-Schwelle SoC (%)")
+    + entity_row("number.e3dc_maestro_vorentladungs_offset_stunden_vor_ladestart", "Offset vor Ladestart (h)")
+    + entity_row("number.e3dc_maestro_vorentladungs_max_leistung",                 "Max. Entladeleistung (W)")
+    + help_btn("help-vorentladung")
+    + """\
+
+      - type: entities
+        title: Tibber-Auto (Vorentladung)
+        entities:
+          - entity: switch.e3dc_maestro_vorentladung_tibber_auto
+            name: Tibber-Auto aktivieren
+"""
+    + entity_row("number.e3dc_maestro_tibber_schwelle_fur_netzexport", "Netzexport-Schwelle (€/kWh)")
+    + help_btn("help-vorentladung")
+    + "\n"
+)
+
+# ─── Tab 6: System ────────────────────────────────────────────────────────────
+
+TAB_6 = (
+    """\
+  - title: System
+    icon: mdi:cog-outline
+    path: system
+    cards:
+
+      - type: custom:mushroom-title-card
+        title: Systemparameter
+
+      - type: entities
+        title: Hardware
+        subtitle: Anlagendaten für korrekte Berechnungen
+        entities:
+"""
+    + entity_row("number.e3dc_maestro_wr_leistung",             "WR-Nennleistung (W)")
+    + entity_row("number.e3dc_maestro_installierte_pv_leistung","Installierte PV (kWp)")
+    + entity_row("number.e3dc_maestro_max_ladeleistung",        "Max. Ladeleistung (W)")
+    + entity_row("number.e3dc_maestro_min_ladeleistung",        "Min. Ladeleistung (W)")
+    + entity_row("number.e3dc_maestro_einspeisegrenze",         "Einspeisegrenze (%)")
+    + help_btn("help-hardware")
+    + """\
+
+      - type: entities
+        title: Steuerverhalten
+        subtitle: Regelzyklus & Stabilisierung
+        entities:
+"""
+    + entity_row("number.e3dc_maestro_soc_hysterese",           "SoC-Hysterese (%)")
+    + entity_row("number.e3dc_maestro_ladeleistungs_anlauf",    "Ladeleistungs-Anlauf (W/Zyklus)")
+    + entity_row("number.e3dc_maestro_aktualisierungsintervall","Aktualisierungsintervall (s)")
+    + entity_row("number.e3dc_maestro_watchdog_timeout",        "Watchdog-Timeout (min)")
+    + help_btn("help-steuerverhalten")
+    + """\
+
+      - type: entities
+        title: Notstromreserve
+        entities:
+          - entity: switch.e3dc_maestro_saisonale_notstromreserve
+            name: Notstromreserve aktiv
+          - entity: sensor.e3dc_maestro_notstromreserve_aktuell
+            name: Reserve heute (%)
+"""
+    + entity_row("number.e3dc_maestro_notstromreserve_winter",      "Reserve Winter (%)")
+    + entity_row("number.e3dc_maestro_notstromreserve_aquinoktium", "Reserve Äquinoktium (%)")
+    + help_btn("help-notstromreserve")
+    + """\
+
+      - type: entities
+        title: Adaptive Reserve
+        subtitle: "Verbrauchsbasierte Mindest-Reserve (Standard: deaktiviert)"
+        entities:
+          - entity: switch.e3dc_maestro_adaptive_reserve_verbrauchsmittel
+            name: Adaptive Reserve aktivieren
+"""
+    + help_btn("help-adaptive-reserve")
+    + """\
+
+      - type: markdown
+        content: >
+          **Adaptive Reserve konfigurieren:** Lookback-Tage, Sicherheitsfaktor und
+          Mindestdaten werden unter *Einstellungen → Integrationen → E3DC Maestro →
+          Konfigurieren → Adaptive Reserve* eingestellt. Die Sensoren sind standardmäßig
+          in der Entitäts-Registry deaktiviert und müssen dort erst aktiviert werden.
+
+      - type: entities
+        title: "Morning-Cap & Schonladung"
+        subtitle: "Batteriekurve glätten + sanft laden (Standard: deaktiviert)"
+        entities:
+          - entity: switch.e3dc_maestro_morning_cap_soc_deckel_morgens
+            name: Morning-Cap aktivieren
+          - entity: number.e3dc_maestro_morning_cap_soc_grenze
+            name: "SoC-Deckel (%)"
+          - entity: number.e3dc_maestro_morning_cap_aktiv_bis_uhr_gmt
+            name: "Aktiv bis (Uhr, lokal)"
+          - entity: switch.e3dc_maestro_schonladung_reduzierte_ladeleistung
+            name: Schonladung aktivieren
+          - entity: number.e3dc_maestro_schonladung_faktor
+            name: "Schonladung Faktor"
+"""
+    + help_btn("help-flat-curve")
+    + """\
+
+"""
+)
+
+# ─── Tab 7: Diagnose (unverändert) ────────────────────────────────────────────
+
+TAB_7 = """\
+  - title: Diagnose
+    icon: mdi:stethoscope
+    path: diagnose
+    cards:
+
+      - type: custom:mushroom-title-card
+        title: Diagnose & Debug
+
+      - type: custom:mushroom-chips-card
+        chips:
+          - type: template
+            content: E3DC
+            icon: mdi:check-network
+            icon_color: "{{ 'green' if is_state('binary_sensor.e3dc_maestro_e3dc_erreichbar', 'on') else 'red' }}"
+            entity: binary_sensor.e3dc_maestro_e3dc_erreichbar
+            tap_action:
+              action: more-info
+          - type: template
+            content: Notfall
+            icon: mdi:battery-alert
+            icon_color: "{{ 'red' if is_state('binary_sensor.e3dc_maestro_notfallladung_aktiv', 'on') else 'grey' }}"
+            entity: binary_sensor.e3dc_maestro_notfallladung_aktiv
+            tap_action:
+              action: more-info
+          - type: template
+            content: Drosselung
+            icon: mdi:transmission-tower-off
+            icon_color: "{{ 'orange' if is_state('binary_sensor.e3dc_maestro_einspeisedrosselung_aktiv', 'on') else 'grey' }}"
+            entity: binary_sensor.e3dc_maestro_einspeisedrosselung_aktiv
+            tap_action:
+              action: more-info
+          - type: template
+            content: Abregelschutz
+            icon: mdi:shield-alert
+            icon_color: "{{ 'amber' if is_state('binary_sensor.e3dc_maestro_abregelschutz_aktiv', 'on') else 'grey' }}"
+            entity: binary_sensor.e3dc_maestro_abregelschutz_aktiv
+            tap_action:
+              action: more-info
+          - type: template
+            content: HT-Schutz
+            icon: mdi:clock-alert
+            icon_color: "{{ 'deep-orange' if is_state('binary_sensor.e3dc_maestro_ht_schutz_aktiv', 'on') else 'grey' }}"
+            entity: binary_sensor.e3dc_maestro_ht_schutz_aktiv
+            tap_action:
+              action: more-info
+
+      - type: entities
+        title: Systemzustand
+        entities:
+          - entity: binary_sensor.e3dc_maestro_e3dc_erreichbar
+            name: E3DC erreichbar
+          - entity: binary_sensor.e3dc_maestro_einspeisedrosselung_aktiv
+            name: Einspeisedrosselung aktiv
+          - entity: binary_sensor.e3dc_maestro_abregelschutz_aktiv
+            name: Abregelschutz aktiv
+          - entity: binary_sensor.e3dc_maestro_ht_schutz_aktiv
+            name: HT-Schutz aktiv
+          - entity: binary_sensor.e3dc_maestro_notfallladung_aktiv
+            name: Notfallladung aktiv
+
+      - type: entities
+        title: Diagnose-Sensoren
+        entities:
+          - entity: sensor.e3dc_maestro_notstromreserve_aktuell
+            name: Notstromreserve (aktuell, %)
+          - entity: sensor.e3dc_maestro_saisonales_ladeende_stunde
+            name: Saisonales Ladeende (Uhrzeit)
+          - entity: sensor.e3dc_maestro_abregelung_verhindert_heute
+            name: Abregelung verhindert (kWh heute)
+
+      - type: entities
+        title: Debug
+        entities:
+          - entity: switch.e3dc_maestro_debug_logging
+            name: Debug-Logging
+          - entity: sensor.e3dc_maestro_debug_log
+            name: Debug-Log
+
+"""
+
+# ─── Tab 8: Hilfe (unverändert) ───────────────────────────────────────────────
+
+TAB_8 = """\
+  - title: Hilfe
+    icon: mdi:help-circle-outline
+    path: hilfe
+    cards:
+
+      - type: custom:mushroom-title-card
+        title: Glossar & Erklärungen
+        subtitle: Alle Features auf einen Blick
+
+      - type: markdown
+        content: |
+          ## Inhaltsverzeichnis
+
+          **Regellogik & Phasen**
+          Alle Phasen sind direkt unten als Glossar erklärt.
+
+          **Feature-Hilfen (Detail-Seiten)**
+
+          | Bereich | Hilfe-Seite |
+          |---|---|
+          | Ladekorridor (SoC-Rampe, Ladeende) | [→ Ladekorridor](/e3dc-maestro/help-ladekorridor) |
+          | Ladeverteilung (Spreading) | [→ Spreading](/e3dc-maestro/help-spreading) |
+          | Abregelschutz (Curtailment Guard) | [→ Abregelschutz](/e3dc-maestro/help-curtailment) |
+          | Spät-Ladung (Two-Tier) | [→ Two-Tier](/e3dc-maestro/help-two-tier) |
+          | Astro-Modus (Sonnenuntergang) | [→ Astro](/e3dc-maestro/help-astro) |
+          | HT/NT-Schutz | [→ HT-Schutz](/e3dc-maestro/help-ht) |
+          | Dynamischer Tarif | [→ Tarif](/e3dc-maestro/help-tarif) |
+          | Tarif-Slots | [→ Tarif-Slots](/e3dc-maestro/help-tariff-slots) |
+          | EVCC – Akku-Entladesperre | [→ EVCC](/e3dc-maestro/help-evcc) |
+          | Wallbox-Überschussregelung | [→ Wallbox](/e3dc-maestro/help-wallbox) |
+          | Wärmepumpe | [→ Wärmepumpe](/e3dc-maestro/help-wp) |
+          | Morgen-Vorentladung | [→ Vorentladung](/e3dc-maestro/help-vorentladung) |
+          | Morning-Cap & Schonladung | [→ Morning-Cap](/e3dc-maestro/help-flat-curve) |
+          | Adaptive Reserve | [→ Adaptive Reserve](/e3dc-maestro/help-adaptive-reserve) |
+          | Notstromreserve | [→ Notstromreserve](/e3dc-maestro/help-notstromreserve) |
+          | Hardware-Parameter | [→ Hardware](/e3dc-maestro/help-hardware) |
+          | Steuerverhalten | [→ Steuerverhalten](/e3dc-maestro/help-steuerverhalten) |
+          | Auto-Optimierung | [→ Auto](/e3dc-maestro/help-auto) |
+
+      - type: markdown
+        content: |
+          ## Regelphase – Glossar
+
+          Maestro wählt in jedem Zyklus genau **eine** aktive Phase. Die Phasen
+          sind nach Priorität geordnet — eine höher priorisierte Phase übersteuert
+          alle nachfolgenden.
+
+          | Priorität | Phase | Chip-Farbe | Bedeutung |
+          |---|---|---|---|
+          | 1 | **off** | grau | Regelung deaktiviert (Master-Switch aus) |
+          | 2 | **emergency** | 🔴 rot | SoC unter Ladeschwelle → Notfallladung mit voller Leistung |
+          | 3 | **feed_in_limit** | 🟠 orange | Netzeinspeisung überschreitet Limit → Akku muss Überschuss aufnehmen |
+          | 4 | **force_discharge** | 🟠 tiefes Orange | Erzwungene Entladung manuell aktiv |
+          | 5 | **reserve_protection** | 🔵 blau | Notstromreserve schützt Mindest-SoC → kein Entladen darunter |
+          | 6 | **evcc_pause** | 🟣 lila | EVCC im Sofortlade-Modus → Akku-Entladesperre aktiv |
+          | 7 | **ht_protection** | 🟤 tiefes Orange | Hochtarif-Fenster → kein Entladen |
+          | 8 | **corridor** | 🟢 grün | Saisonaler Ladekorridor → lineare SoC-Rampe bis Ladeende |
+          | 9 | **pv_delay** | 💚 hellgrün | PV-Prognose gut genug → Korridor-Ladung bewusst verzögert |
+          | 10 | **spreading** | 🩵 türkis | Ladeverteilung → Rate gleichmäßig auf Restzeit verteilt |
+          | 11 | **curtailment_guard** | 🟡 amber | Abregelschutz → erzwingt Mindest-Ladung gegen PV-Verlust |
+          | 12 | **idle** | grau | Kein Ladebedarf / außerhalb der Zeitfenster |
+
+      - type: markdown
+        content: |
+          ## Erzwungene Entladung (force_discharge)
+
+          Die erzwungene Entladung wird **manuell** über den Switch
+          *Erzwungene Entladung* oder die zugehörige Number-Entity ausgelöst.
+          Maestro entlädt den Akku dann aktiv ins Netz oder in den Hausverbrauch —
+          unabhängig von Tarif, Korridor oder anderen Phasen.
+
+          **Wann sinnvoll?**
+          - Vor einem günstigen Nachtstrom-Ladefenster (Tibber): Akku leeren,
+            damit er anschließend günstig aufgeladen werden kann.
+          - Manueller Lastausgleich bei Netzengpass.
+          - Test der E3DC-Entladefunktion.
+
+          **Grenzen:**
+          - Maestro entlädt nie unter die aktive Notstromreserve.
+          - Die Entladeleistung ist durch die Number-Entity (W) begrenzt.
+          - Emergency-Ladung (Phase 2) hat immer Vorrang — wenn der SoC
+            gleichzeitig unter die Ladeschwelle fällt, stoppt Maestro die
+            erzwungene Entladung sofort.
+
+          **Sicherheit:** Die erzwungene Entladung schaltet sich **nicht automatisch
+          ab**. Sie muss manuell deaktiviert oder durch eine Automatisierung
+          zeitlich begrenzt werden.
+
+      - type: markdown
+        content: |
+          ## PV-Verzögerung (pv_delay)
+
+          Wenn der Forecast-Sensor eine ausreichend hohe PV-Prognose für den
+          restlichen Tag meldet, kann Maestro die Korridor-Ladung **bewusst
+          verzögern**. Der Gedanke: Wenn der Akku später ohnehin durch PV voll
+          wird, ist unnötiges frühes Laden aus dem Netz Verschwendung.
+
+          **Bedingungen für pv_delay:**
+          - Der Forecast-Sensor ist aktiviert und liefert Daten.
+          - Prognostizierter PV-Ertrag bis Ladeende ≥ benötigte Restenergie
+            (Ziel-SoC − aktueller SoC) mit einem Sicherheitspuffer.
+          - Aktueller SoC liegt noch im Korridor-Fenster (nicht bereits voll).
+          - Kein Curtailment-Guard-Trigger (Abregelung hat Vorrang).
+
+          **Resultat:** Maestro wechselt kurzzeitig auf idle, anstatt aktiv zu
+          laden. Sobald die Prognose schlechter wird oder der Korridor-Zeitraum
+          abläuft, springt Maestro zurück auf corridor oder spreading.
+
+          **Hinweis:** pv_delay erfordert mindestens 7 Tage Verbrauchshistorie
+          für eine verlässliche Prognose. In den ersten Tagen nach Installation
+          ist die Phase daher inaktiv.
+
+      - type: markdown
+        content: |
+          ## Abregelschutz (Curtailment Guard)
+
+          Bei Anlagen mit Einspeisebegrenzung (z. B. 70%-Regel) oder DC-seitiger
+          Überdimensionierung würde der Wechselrichter PV-Energie **abregeln**
+          (vernichten), wenn das Ladelimit zu niedrig ist.
+
+          Curtailment Guard berechnet in jedem Zyklus einen Floor:
+            floor_feed_in  = max(0, PV − Hausverbrauch − Einspeisegrenze_W)
+            floor_inverter = max(0, PV − WR-Nennleistung_W)
+            floor          = max(floor_feed_in, floor_inverter)
+
+          Überschreitet floor die Einschaltschwelle, erzwingt Maestro mindestens
+          diese Ladeleistung. Hysterese verhindert Flackern bei PV-Schwankungen.
+
+          **Vorrang:** Curtailment Guard übersteuert Morning-Cap, Korridor-Pause
+          und pv_delay — Energie-Vernichtung hat höchste Priorität.
+
+      - type: markdown
+        content: |
+          ## Ladeverteilung (Spreading)
+
+          Anstatt mit maximaler Ladeleistung sofort auf den Ziel-SoC zu laden,
+          verteilt Spreading die Restenergie gleichmäßig auf die verbleibende Zeit:
+
+            Restzeit (h)  = Ladeende_Uhrzeit − jetzt
+            Restenergie   = (Ziel_SoC − akt_SoC) / 100 × Kapazität_kWh
+            Soll-Rate (W) = Restenergie × 1000 / Restzeit
+
+          Vorteil: Der Akku ist pünktlich voll, lädt aber zwischendurch langsamer —
+          weniger Verluste und mehr Raum für PV-Spitzen.
+
+      - type: markdown
+        content: |
+          ## Saisonaler Ladekorridor
+
+          Das Ladeende variiert je nach Jahreszeit (Winter früh, Sommer spät).
+          Vor dem Ladeende steigt der Ziel-SoC linear von ~20 % auf Ladeende-SoC.
+          Ist Two-Tier aktiviert, gibt es danach ein zweites Fenster bis Spät-Ladeende.
+
+          Im Astro-Modus ersetzt der Sonnenuntergang-Offset die fixen Ladeende-Uhrzeiten.
+
+      - type: markdown
+        content: |
+          ## HT/NT-Schutz
+
+          Verhindert das Entladen des Akkus im Hochtarif-Fenster (Phase ht_protection).
+          Die Mindest-Reserve ist saisonal variabel (cosinus-interpoliert zwischen
+          Winter- und Äquinoktium-Wert).
+
+          Alle Zeitangaben werden in der **HA-Lokalzeit** ausgewertet
+          (Europe/Berlin → automatisch MEZ/MESZ). Keine UTC-Umrechnung nötig.
+
+      - type: markdown
+        content: |
+          ## Korridor-Pause
+
+          Wenn die Soll-Ladeleistung im Korridor sehr klein ist (weit vor Ladeende,
+          Akku schon fast voll), schaltet die Korridor-Pause auf idle — der Akku
+          wartet auf einen kräftigeren PV-Überschuss später am Tag.
+
+          Der Curtailment Guard übersteuert die Pause immer, wenn Abregelung droht.
+
+      - type: markdown
+        content: |
+          ## EVCC-Akku-Entladesperre vs. Wallbox-Überschussregelung
+
+          Diese beiden Features sind **vollständig unabhängig** voneinander:
+
+          | | EVCC-Entladesperre | Wallbox-Überschussregelung |
+          |---|---|---|
+          | **Was sie tut** | Sperrt Akku-Entladung wenn Auto im Sofortladen-Modus | Regelt Ladestrom der Wallbox nach PV-Überschuss |
+          | **Einfluss auf** | E3DC-Akku (discharge limit) | Wallbox-Ladestrom (A) |
+          | **Gesteuert über** | EVCC Lädt-Sensor + Modus-Sensor | PV-Überschuss-Berechnung |
+          | **Schalter** | switch.e3dc_maestro_evcc_integration | switch.e3dc_maestro_wallbox_regelung |
+
+          Beide Schalter können unabhängig aktiviert/deaktiviert werden.
+          Die EVCC-Entladesperre funktioniert auch ohne Wallbox-Regelung und umgekehrt.
+
+"""
+
+# ─── Hilfe-Subviews (subview: true = kein Tab, HA zeigt ←-Button automatisch) ─
+
+SUBVIEW_LADEKORRIDOR = help_subview(
+    path="help-ladekorridor",
+    title="Hilfe: Ladekorridor",
+    content="""\
+## Ladekorridor – Parameter
+
+Der Ladekorridor definiert den saisonalen Tagesplan: bis wann und auf wie viel
+Prozent der Akku geladen sein soll. Die Rampe steigt linear vom aktuellen SoC
+auf den Ziel-SoC.
+
+---
+
+### Ladeschwelle / Notfall (%)
+
+**Wirkung:** Unterschreitet der Akku-SoC diesen Wert, schaltet Maestro sofort in
+die Notfallladung (emergency). In dieser Phase wird mit maximaler Ladeleistung
+geladen – unabhängig von Tarif, Korridor oder sonstigen Einschränkungen.
+
+**Empfehlung:** 15–20 %. Zu niedrig → Akku kann tiefentladen werden.
+Zu hoch → unnötige Notfallladungen tagsüber.
+
+**Standard:** 15 %
+
+---
+
+### Ladeende SoC (%)
+
+**Wirkung:** Der maximale SoC, der am Ende des Ladezeitfensters erreicht werden
+soll. Oberhalb dieses Werts wird der Akku nicht weiter aktiv geladen.
+
+**Empfehlung:** 90–100 %. Zur Akku-Schonung kann 90 % gesetzt werden.
+
+**Standard:** 95 %
+
+---
+
+### Ladeende Winter (Stunde, lokal)
+
+**Wirkung:** Uhrzeit in HA-Lokalzeit (MEZ/MESZ), zu der die Korridor-Ladung
+im Winter (Dezember) abgeschlossen sein soll. Im Winter ist morgens wenig PV
+– frühes Ladeende sichert Puffer für den Abend.
+
+**Hinweis:** Maestro arbeitet mit der Systemzeit von Home Assistant; trage
+die gewünschte Uhrzeit so ein, wie du sie auf der Wanduhr siehst.
+
+**⚠ Wechselwirkung mit Astro-Modus:** Solange der Schalter
+*Astro-Modus (Sonnenüberwachung)* aktiv ist, wird dieser Wert **vollständig
+ignoriert**. Das Ladeende kommt dann ausschließlich aus
+`Sonnenuntergang + Offset zu Sonnenuntergang`. Setze Astro auf OFF, damit
+„Ladeende Winter" und „Ladeende Sommer" tageslängenbasiert interpoliert
+werden.
+
+**Standard:** 11
+
+---
+
+### Ladeende Sommer (Stunde, lokal)
+
+**Wirkung:** Uhrzeit in HA-Lokalzeit, zu der das Ladeende im Sommer (Juni)
+angesetzt wird. Im Sommer lohnt es sich, die Ladung bis in den Nachmittag
+zu strecken.
+
+**⚠ Wechselwirkung mit Astro-Modus:** wie bei „Ladeende Winter" – im
+Astro-Modus ohne Wirkung.
+
+**Standard:** 18 (= 18:00 lokal)
+
+---
+
+### Ziel-Ladeende Sommer (Stunde, lokal)
+
+**Wirkung:** Wunsch-Ladeende für die Sommermonate als Startwert für die saisonale
+Interpolation. Wird durch den Astro-Modus überschrieben, wenn dieser aktiv ist.
+
+**Wechselwirkung:** Astro-Modus berechnet das Ladeende dynamisch aus dem
+Sonnenuntergang und ignoriert diesen Wert dann vollständig.
+
+**Standard:** 16
+""",
+)
+
+SUBVIEW_SPREADING = help_subview(
+    path="help-spreading",
+    title="Hilfe: Ladeverteilung (Spreading)",
+    content="""\
+## Ladeverteilung (Spreading) – Parameter
+
+Spreading verhindert, dass Maestro den Akku sofort mit voller Leistung auf den
+Ziel-SoC lädt. Stattdessen wird die Restenergie gleichmäßig auf die verbleibende
+Zeit bis zum Ladeende verteilt.
+
+Formel:
+  Soll-Rate (W) = (Ziel_SoC - akt_SoC) / 100 × Kapazität_kWh × 1000 / Restzeit_h
+
+Vorteil: Mehr Raum für PV-Spitzen, gleichmäßigere Auslastung, geringere Verluste.
+
+---
+
+### Spreading-Ziel SoC (%)
+
+**Wirkung:** Der SoC-Wert, bis zu dem Spreading aktiv ist. Ist der Akku-SoC
+höher als dieser Wert, ist Spreading abgeschlossen und Maestro wechselt zu einer
+anderen Phase (corridor oder idle).
+
+**Empfehlung:** Gleich dem Ladeende SoC setzen, damit Spreading den gesamten
+Ladevorgang steuert. Kann kleiner gesetzt werden, wenn die letzten Prozente
+zügig geladen werden sollen (CC/CV-Übergang des Akkus).
+
+**Standard:** entspricht Ladeende SoC (z. B. 95 %)
+""",
+)
+
+SUBVIEW_CURTAILMENT = help_subview(
+    path="help-curtailment",
+    title="Hilfe: Abregelschutz",
+    content="""\
+## Abregelschutz (Curtailment Guard) – Parameter
+
+Bei Anlagen mit Einspeisebegrenzung (z. B. 70%-Regel) oder DC-seitiger
+Überdimensionierung rechnet Maestro in jedem Zyklus einen Floor:
+
+  floor_feed_in  = max(0, PV_aktuell - Hausverbrauch - Einspeisegrenze_W)
+  floor_inverter = max(0, PV_aktuell - WR_Nennleistung_W)
+  floor          = max(floor_feed_in, floor_inverter)
+
+Sobald floor die Einschaltschwelle überschreitet, erzwingt Maestro eine
+Mindest-Ladeleistung in genau dieser Höhe, damit keine PV-Energie abgeregelt wird.
+
+---
+
+### Einschaltschwelle (W)
+
+**Wirkung:** floor muss diesen Wert erreichen oder überschreiten, damit der
+Guard aktiviert wird. Höherer Wert → Guard springt seltener an, aber bei kleinen
+Abregelmengen entstehen geringe Verluste.
+
+**Empfehlung:** 1000–2000 W. Anlagen mit enger 70%-Grenze können auf 500 W senken.
+
+**Wechselwirkung:** Muss immer größer als die Ausschaltschwelle sein.
+
+**Standard:** 1500 W
+
+---
+
+### Ausschaltschwelle (W)
+
+**Wirkung:** floor muss unter diesen Wert fallen, damit der Guard wieder
+deaktiviert wird (Hysterese). Verhindert Flackern bei leichten PV-Schwankungen.
+
+**Empfehlung:** 300–800 W. Deutlich kleiner als die Einschaltschwelle wählen.
+
+**Standard:** 500 W
+""",
+)
+
+SUBVIEW_TWO_TIER = help_subview(
+    path="help-two-tier",
+    title="Hilfe: Spät-Ladung (Two-Tier)",
+    content="""\
+## Spät-Ladung (Two-Tier) – Parameter
+
+Two-Tier ergänzt den normalen Ladekorridor um ein zweites Ladefenster am Abend.
+Nach dem regulären Ladeende lädt der Akku weiter bis zu einem zweiten, höheren
+Ziel-SoC.
+
+Typischer Anwendungsfall: Im Winter den Akku nachmittags auf 80 % bringen
+(Korridor), dann abends mit günstiger Netzenergie noch auf 100 % aufladen.
+
+---
+
+### Spätziel SoC (%)
+
+**Wirkung:** Der Ziel-SoC des zweiten Ladefensters. Liegt dieser Wert über dem
+normalen Ladeende SoC, wird nach Erreichen des ersten Ziels weiter geladen.
+
+**Empfehlung:** 95–100 %. Unter dem Ladeende SoC ist Two-Tier wirkungslos.
+
+**Standard:** 100 %
+
+---
+
+### Spät-Ladeende (Stunde, lokal)
+
+**Wirkung:** Uhrzeit in HA-Lokalzeit, zu der das zweite Ladefenster endet.
+Nach dieser Zeit stoppt Maestro die aktive Ladung auch wenn der Spätziel-SoC
+nicht erreicht wurde.
+
+**Standard:** 20
+""",
+)
+
+SUBVIEW_ASTRO = help_subview(
+    path="help-astro",
+    title="Hilfe: Astro-Modus",
+    content="""\
+## Astro-Modus – Parameter
+
+Im Astro-Modus berechnet Maestro das Ladeende und den Ladestart täglich neu auf
+Basis der Sonnenuntergangs- und Sonnenaufgangszeiten am Standort.
+Der Standort wird automatisch aus den Home Assistant Systemeinstellungen übernommen.
+
+Vorteil: Im Sommer verschiebt sich das Ladeende automatisch nach hinten (mehr PV),
+im Winter nach vorne – ohne manuelle Anpassung.
+
+---
+
+### Offset zu Sonnenuntergang (h)
+
+**Wirkung:** Wie viele Stunden vor dem Sonnenuntergang das Ladeende angesetzt
+wird. Positiver Wert = Ladeende liegt vor Sonnenuntergang.
+
+Beispiel: Offset = 2, Sonnenuntergang 20:30 → Ladeende 18:30.
+
+**Empfehlung:** 1–3 h. Größerer Wert = konservativerer Puffer für den Abend.
+Zu groß → Akku wird früh voll, PV-Spitzen am Nachmittag gehen verloren.
+
+**Wechselwirkung:** Überschreibt Ladeende Winter und Ladeende Sommer vollständig,
+solange Astro-Modus aktiv ist.
+
+**Standard:** 2 h
+
+---
+
+### Offset nach Sonnenaufgang (h)
+
+**Wirkung:** Wie viele Stunden nach dem Sonnenaufgang der Ladestart frühestens
+erlaubt ist. Verhindert, dass Maestro kurz nach Mitternacht lädt.
+
+Beispiel: Offset = 1, Sonnenaufgang 05:45 → Ladestart frühestens 06:45.
+
+**Empfehlung:** 0.5–2 h. Notfallladungen (emergency) greifen trotzdem früher ein.
+
+**Standard:** 1 h
+""",
+)
+
+SUBVIEW_HT = help_subview(
+    path="help-ht",
+    title="Hilfe: HT/NT-Schutz",
+    content="""\
+## Hochtarif-Schutz – Parameter
+
+Der HT-Schutz verhindert, dass Maestro den Akku im Hochtarif-Fenster entlädt
+(Phase ht_protection). Gleichzeitig hält er eine saisonal variable Mindest-Reserve.
+
+**Wichtig:** Alle Zeitangaben werden in der HA-Lokalzeit ausgewertet
+(Europe/Berlin → automatisch MEZ im Winter / MESZ im Sommer). Trage die
+Uhrzeit so ein, wie du sie auf der Wanduhr siehst.
+
+---
+
+### HT Beginn (Stunde, lokal)
+
+**Wirkung:** Beginn des Hochtarif-Fensters als Stunde in HA-Lokalzeit.
+
+Beispiel: 6 → 06:00 Uhr lokal (egal ob Winter- oder Sommerzeit).
+
+**Standard:** 6
+
+---
+
+### HT Ende (Stunde, lokal)
+
+**Wirkung:** Ende des Hochtarif-Fensters als Stunde in HA-Lokalzeit.
+
+Beispiel: 21 → 21:00 Uhr lokal.
+
+**Standard:** 21
+
+---
+
+### HT-Reserve Winter (%)
+
+**Wirkung:** Minimaler SoC, den Maestro während des HT-Fensters im Winter
+(Dezember) schützt. Der Akku wird nicht unter diesen Wert entladen.
+
+**Empfehlung:** 20–40 %. Höher = mehr Puffer für Abendverbrauch, aber weniger
+Spielraum für Vorentladung.
+
+**Standard:** 30 %
+
+---
+
+### HT-Reserve Äquinoktium (%)
+
+**Wirkung:** Minimaler SoC zur Tagundnachtgleiche (ca. 21. März / 23. September).
+Maestro interpoliert **tageslängenbasiert** (astrobasiert) zwischen Winter- und Äquinoktiumswert.
+Im Sommer (längster Tag) liegt die Reserve nahe 0 %.
+
+**Empfehlung:** 10–20 %. Kleiner als der Winterwert.
+
+**Standard:** 15 %
+""",
+)
+
+SUBVIEW_TARIF = help_subview(
+    path="help-tarif",
+    title="Hilfe: Dynamischer Tarif",
+    content="""\
+## Dynamischer Tarif – Parameter
+
+Maestro kann bei einem dynamischen Stromtarif (z. B. Tibber, aWATTar) günstige
+Stunden nutzen, um den Akku aus dem Netz zu laden. Zwei Parameter begrenzen
+das Risiko ungewollt hoher Bezugskosten.
+
+---
+
+### Günstig-Schwelle (€/kWh)
+
+**Wirkung:** Liegt der aktuelle Spotpreis unter diesem Wert, gilt die Stunde als
+günstig und Netzladung wird grundsätzlich freigegeben – sofern das Tageslimit
+noch nicht erreicht ist.
+
+**Empfehlung:** 0.05–0.15 €/kWh. Zu hoch → Maestro lädt auch bei teuren Preisen.
+Zu niedrig → Günstigstunden werden nie erkannt.
+
+**Wechselwirkung:** Wirkt nur, wenn ein Preissensor in HA verfügbar und
+mit Maestro verknüpft ist.
+
+**Standard:** 0.10 €/kWh
+
+---
+
+### Max. Netzladung/Tag (kWh)
+
+**Wirkung:** Maximale Energiemenge in kWh, die Maestro pro Kalendertag aus dem
+Netz laden darf – auch wenn der Preis günstig ist. Verhindert unbeabsichtigt
+hohe Netzbezugskosten an Tagen mit vielen Günstigstunden.
+
+**Empfehlung:** 5–15 kWh je nach Akkugröße. Für 11 kWh Akku typisch 8–10 kWh.
+
+**Standard:** 10 kWh
+""",
+)
+
+SUBVIEW_EVCC = help_subview(
+    path="help-evcc",
+    title="Hilfe: EVCC – Akku-Entladesperre",
+    content="""\
+## EVCC – Akku-Entladesperre bei Sofortladen
+
+Diese Funktion ist **unabhängig von der Wallbox-Überschussregelung**. Sie schützt
+ausschließlich den Hausakku, wenn das Auto über EVCC/OpenWB im Sofortlade-Modus
+geladen wird, und verhindert, dass das Fahrzeug den Akku leerzieht.
+
+Maestro greift nur ein, wenn **beide** Bedingungen gleichzeitig erfüllt sind:
+
+1. Der konfigurierte EVCC-Lädt-Sensor meldet `on/true` (das Auto zieht tatsächlich Strom)
+2. Der EVCC-Modus-Sensor steht auf dem konfigurierten Now-Wert (z. B. `now` bzw. `Instant Charging`)
+
+Sobald **eine** der Bedingungen wegfällt, wird das Limit automatisch aufgehoben
+und Maestro fährt seinen normalen Regelbetrieb weiter.
+
+---
+
+### EVCC-Integration aktiv
+
+**Master-Schalter** der Funktion. Aus → keine Sperre, Maestro ignoriert EVCC
+vollständig.
+
+Die zugehörigen Sensoren (Lädt-Sensor, Modus-Sensor, Now-Wert) werden im
+Konfigurations-Wizard der Integration gesetzt.
+
+---
+
+### Akku-Entladungslimit im Now-Modus (W)
+
+**Wirkung:** Maximale Akku-Entladeleistung, solange EVCC im Sofortlade-Modus lädt.
+
+- **`0` W (Standard):** Akku-Entladung wird komplett gesperrt — das Auto zieht
+  nur aus PV und Netz, der Akku bleibt auf seinem aktuellen SoC.
+- **`> 0` W (z. B. `500`):** Erlaubt einen Grundlastwert. Der Akku darf bis zu
+  diesem Wert entladen werden, um den Hausbedarf zu decken; das Auto greift
+  nicht darüber hinaus auf den Akku zu.
+
+**Hinweis:** Manche E3DC-Modelle erzwingen eine system-definierte Mindest-
+Entladerate, die nicht unterschritten werden kann. Falls die Vollsperre (`0` W)
+in deinem System nicht greift, setze einen kleinen Grundlastwert (z. B. `100` W).
+
+**Standard:** 0 W
+""",
+)
+
+SUBVIEW_WALLBOX = help_subview(
+    path="help-wallbox",
+    title="Hilfe: Wallbox-Überschussregelung",
+    content="""\
+## Wallbox-Überschussregelung – Parameter
+
+Maestro steuert den Ladestrom der Wallbox in Abstimmung mit dem PV-Überschuss.
+Die Parameter begrenzen den Betriebsbereich und schützen vor ungültigen Befehlen.
+
+> Diese Funktion ist **unabhängig von der EVCC-Akku-Entladesperre**. Beide
+> Schalter können separat aktiviert werden.
+
+---
+
+### Min-Strom (A)
+
+**Wirkung:** Minimaler Ladestrom in Ampere. Fällt der berechnete Sollstrom darunter,
+stoppt Maestro die Wallbox vollständig.
+
+**Empfehlung:** 6 A (IEC-61851-Minimum). Manche Fahrzeuge erst ab 8 A.
+
+**Standard:** 6 A
+
+---
+
+### Max-Strom (A)
+
+**Wirkung:** Maximaler Ladestrom, auf den Maestro die Wallbox begrenzt. Darf nicht
+größer als das physische Maximum der Wallbox oder des Fahrzeugs sein.
+
+**Empfehlung:** Hausanschluss-Limit und Wallbox-Maximum beachten. Typisch 16 A
+(einphasig) oder 11/22 A (dreiphasig).
+
+**Standard:** 16 A
+
+---
+
+### Mindest-Überschuss (W)
+
+**Wirkung:** PV-Überschuss in Watt, ab dem Maestro die Wallbox einschaltet.
+Unterschreitet der Überschuss diesen Wert, pausiert die Wallbox.
+
+**Empfehlung:** 6 A × 230 V ≈ 1380 W (einphasig). Verhindert Netzladung.
+
+**Standard:** 1380 W
+""",
+)
+
+SUBVIEW_WP = help_subview(
+    path="help-wp",
+    title="Hilfe: Wärmepumpe",
+    content="""\
+## Wärmepumpe – Parameter
+
+Maestro kann eine Wärmepumpe als flexible Last steuern: bei PV-Überschuss
+einschalten, bei Mangel pausieren. Die Mindestlaufzeit und -pause schützen den
+Verdichter vor zu häufigem Schalten.
+
+---
+
+### Mindest-Überschuss (W)
+
+**Wirkung:** PV-Überschuss, ab dem Maestro die Wärmepumpe freigibt. Unterschreitet
+der Überschuss diesen Wert, stoppt Maestro die WP (nach Ablauf der Mindestlaufzeit).
+
+**Standard:** 1000 W
+
+---
+
+### Max-Preis (€/kWh)
+
+**Wirkung:** Maximaler Strompreis, bis zu dem die WP auch bei zu wenig PV-Überschuss
+eingeschaltet bleibt (z. B. günstiger Nachtstrom für Heizung). Nur wirksam bei
+vorhandenem Preissensor.
+
+**Empfehlung:** 0.00–0.10 €/kWh. 0.00 → WP läuft nur bei PV-Überschuss.
+
+**Standard:** 0.05 €/kWh
+
+---
+
+### Mindestlaufzeit (min)
+
+**Wirkung:** Mindestlaufzeit in Minuten, bevor die WP nach dem Einschalten wieder
+gestoppt werden darf. Verhindert häufiges Takten (Kompressorschutz).
+
+**Standard:** 20 min
+
+---
+
+### Mindestpause (min)
+
+**Wirkung:** Mindestpause in Minuten nach dem Stopp, bevor die WP erneut starten
+darf. Schützt den Anlaufkondensator und den Verdichter vor Überhitzung.
+
+**Standard:** 10 min
+""",
+)
+
+SUBVIEW_VORENTLADUNG = help_subview(
+    path="help-vorentladung",
+    title="Hilfe: Morgen-Vorentladung",
+    content="""\
+## Morgen-Vorentladung – Parameter
+
+Die Vorentladung (Phase 6) entlädt den Akku kurz vor dem erwarteten Ladestart
+aktiv auf einen niedrigen SoC. Dadurch steht am nächsten Morgen mehr Kapazität
+für den PV-Ertrag zur Verfügung.
+
+Typischer Anwendungsfall: Im Winter den Akku abends auf 30 % entladen, damit er
+am nächsten Tag komplett mit PV aufgeladen werden kann.
+
+---
+
+### Vorentladungs-Modus
+
+**Optionen:**
+- **off** – Vorentladung deaktiviert.
+- **fixed_time** – Startet täglich zur fixen Offsetzeit (Ladestart minus Offset).
+- **tibber_auto** – Exportiert Energie, wenn Tibber-Preis über der Netzexport-Schwelle
+  liegt (günstige Abnahmezeiten für Versorger nutzen).
+
+**Standard:** off
+
+---
+
+### Entlade-Ziel SoC (%)
+
+**Wirkung:** SoC-Ziel nach der Vorentladung. Maestro entlädt bis zu diesem Wert.
+
+**Empfehlung:** 20–40 %. Die Notstromreserve hat immer Vorrang und begrenzt
+die Vorentladung nach unten.
+
+**Standard:** 30 %
+
+---
+
+### Einschalt-Schwelle SoC (%)
+
+**Wirkung:** Vorentladung wird nur gestartet, wenn der aktuelle SoC über diesem
+Wert liegt. Ist der Akku schon leer, macht eine Vorentladung keinen Sinn.
+
+**Empfehlung:** 40–60 %. Muss über dem Entlade-Ziel SoC liegen.
+
+**Standard:** 50 %
+
+---
+
+### Offset vor Ladestart (h)
+
+**Wirkung:** Wie viele Stunden vor dem berechneten Ladestart die Vorentladung
+beginnt.
+
+Beispiel: Ladestart 07:00, Offset 2 h → Vorentladung startet um 05:00.
+
+**Standard:** 2 h
+
+---
+
+### Max. Entladeleistung (W)
+
+**Wirkung:** Maximale Entladeleistung während der Vorentladung in Watt. Begrenzt
+die Netzeinspeisung und schont den Akku bei langen Vorentladungs-Phasen.
+
+**Standard:** 3000 W
+
+---
+
+### Netzexport-Schwelle (€/kWh) – Tibber-Auto
+
+**Wirkung:** Im Tibber-Auto-Modus entlädt Maestro nur, wenn der aktuelle
+Tibber-Preis über diesem Wert liegt – zu teuren Stunden, in denen Einspeisung
+besonders lukrativ ist.
+
+**Empfehlung:** 0.20–0.35 €/kWh. Zu niedrig → Akku wird auch bei normalen
+Preisen entladen.
+
+**Standard:** 0.25 €/kWh
+""",
+)
+
+SUBVIEW_HARDWARE = help_subview(
+    path="help-hardware",
+    title="Hilfe: Hardware-Parameter",
+    content="""\
+## Hardware – Parameter
+
+Diese Werte beschreiben die physische Anlage. Falsche Angaben führen zu
+fehlerhaften Curtailment-Guard-Berechnungen und falschen Einspeiselimits.
+
+---
+
+### WR-Nennleistung (W)
+
+**Wirkung:** AC-seitige Nennleistung des Wechselrichters. Maestro nutzt diesen
+Wert für den Curtailment-Guard-Floor:
+
+  floor_inverter = max(0, PV_aktuell - WR_Nennleistung)
+
+**Standard:** 10000 W (typisch E3DC S10 E)
+
+---
+
+### Installierte PV (kWp)
+
+**Wirkung:** Installierte PV-Nennleistung in kWp. Wird für Berechnungskontext
+und Logging verwendet.
+
+**Standard:** je nach Anlage (z. B. 12.0 kWp)
+
+---
+
+### Max. Ladeleistung (W)
+
+**Wirkung:** Maximale Ladeleistung, auf die Maestro den Akku begrenzt.
+Muss kleiner oder gleich dem physischen Akkumaximum sein.
+
+**Empfehlung:** Nicht über das Akku-Datenblattmaximum setzen.
+Typisch 4500 W für einen E3DC 9,6 kWh Akku.
+
+**Standard:** 4500 W
+
+---
+
+### Min. Ladeleistung (W)
+
+**Wirkung:** Minimale Ladeleistung, unter die Maestro nicht geht. Verhindert
+Kriechladung und Wechselrichter-Instabilitäten bei zu geringen Regelwerten.
+
+**Standard:** 200 W
+
+---
+
+### Einspeisegrenze (%)
+
+**Wirkung:** Maximale Netzeinspeisung als Prozent der installierten PV-Leistung.
+Für die gesetzliche 70%-Regel: Wert = 70.
+
+Maestro berechnet daraus:
+  Einspeisegrenze_W = Einspeisegrenze% / 100 × installierte_PV_kWp × 1000
+  floor_feed_in     = max(0, PV - Verbrauch - Einspeisegrenze_W)
+
+**Standard:** 70 (%)
+""",
+)
+
+SUBVIEW_STEUERVERHALTEN = help_subview(
+    path="help-steuerverhalten",
+    title="Hilfe: Steuerverhalten",
+    content="""\
+## Steuerverhalten – Parameter
+
+Diese Parameter steuern die Stabilitätsmechanismen des Regelzyklus. Zu kleine
+Werte führen zu Flackern, zu große zu träger Reaktion.
+
+---
+
+### SoC-Hysterese (%)
+
+**Wirkung:** Prozentualer Puffer um SoC-Schwellen, um Flackern zu vermeiden.
+Beispiel: Ladeende SoC = 95 %, Hysterese = 2 % → Maestro stoppt bei 95 %,
+startet erst wieder bei < 93 %.
+
+**Empfehlung:** 1–3 %. Zu groß → SoC-Schwellen werden ungenau eingehalten.
+
+**Standard:** 2 %
+
+---
+
+### Ladeleistungs-Anlauf (W/Zyklus)
+
+**Wirkung:** Maximale Änderung der Ladeleistung pro Regelzyklus in Watt.
+Verhindert abrupte Leistungssprünge, die den Wechselrichter destabilisieren.
+
+Beispiel: Anlauf = 200 W, Zyklus = 30 s → 200 W alle 30 s bis zur Sollleistung.
+
+**Empfehlung:** 100–500 W. Zu groß → ruckartige Regelung.
+
+**Standard:** 200 W/Zyklus
+
+---
+
+### Aktualisierungsintervall (s)
+
+**Wirkung:** Zeitabstand zwischen zwei Regelzyklen in Sekunden.
+Kürzeres Intervall = reaktionsschnellere Regelung, aber höhere Last auf HA und E3DC.
+
+**Empfehlung:** 20–60 s. Unter 15 s kann die E3DC-Modbus-Verbindung überlastet werden.
+
+**Standard:** 30 s
+
+---
+
+### Watchdog-Timeout (min)
+
+**Wirkung:** Wenn Maestro für diese Zeitspanne keine Daten von HA erhält
+(z. B. HA-Neustart), wechselt es in einen sicheren Standby-Modus und
+setzt die Ladeleistung auf 0 W.
+
+**Empfehlung:** 5–15 min. Zu kurz → Fehlalarm bei kurzen HA-Pausen.
+
+**Standard:** 10 min
+""",
+)
+
+SUBVIEW_TARIFF_SLOTS = help_subview(
+    path="help-tariff-slots",
+    title="Hilfe: Tarif-Slots",
+    content="""\
+## Tarif-Slots – Konfiguration
+
+Der Tarif-Slot-Scheduler ersetzt die fixen HT/NT-Felder durch eine flexible Liste
+von Tarif-Fenstern. Jeder Slot definiert ein Zeitfenster mit Wochentagen, Start-
+und Endzeit sowie einer Klasse, die das Regelverhalten bestimmt.
+
+**Konfigurationsort:** *Einstellungen → Integrationen → E3DC Maestro →
+Konfigurieren → Tarif-Slots*
+
+---
+
+### Klassen
+
+| Klasse | Wirkung |
+|--------|---------|
+| **high** | Kein Entladen – HT-Schutz aktiv |
+| **low** | Netzladung erlaubt – günstige Stunden nutzen |
+| **normal** | Neutral – Maestro entscheidet nach Standardlogik |
+
+---
+
+### Wochentage
+
+Slots können gezielt für Werktage (Mo–Fr), Samstag, Sonntag oder beliebige
+Kombinationen konfiguriert werden.
+
+Beispiel typische Konfiguration für Haushaltsstrom:
+- Slot 1: Mo–Fr 06:00–21:00 Uhr, Klasse `high` (Haupttarif)
+- Slot 2: Sa–So 08:00–20:00 Uhr, Klasse `high` (Wochenend-Tarif)
+
+---
+
+### Mindest-SoC-Reserve im Slot
+
+Optionale Reserve, die nur innerhalb dieses Slots gilt – zusätzlich zur
+saisonalen Notstromreserve. Nützlich z. B. für Abend-Spitzenlast.
+
+---
+
+### Verhältnis zu Legacy-HT-Feldern
+
+Die alten Felder `HT Beginn`, `HT Ende`, `HT-Reserve Winter/Äquinoktium` und die
+HT-Switches bleiben als schnelle Grundkonfiguration erhalten und werden weiterhin
+berücksichtigt, wenn keine Tarif-Slots definiert sind. Tarif-Slots haben Vorrang.
+""",
+)
+
+SUBVIEW_ADAPTIVE_RESERVE = help_subview(
+    path="help-adaptive-reserve",
+    title="Hilfe: Adaptive Reserve",
+    content="""\
+## Adaptive Reserve – Parameter
+
+Die adaptive Reserve berechnet den benötigten Mindest-SoC automatisch aus dem
+rollenden Verbrauchsmittelwert der letzten Tage – statt statische Winter/Sommer-
+Werte zu verwenden.
+
+**Standardmäßig deaktiviert.** Bei Aktivierung läuft parallel zur statischen
+Reserve; der höhere Wert gilt.
+
+**Konfigurationsort:** *Einstellungen → Integrationen → E3DC Maestro →
+Konfigurieren → Adaptive Reserve*
+
+---
+
+### Adaptive Reserve aktivieren
+
+**Wirkung:** Schalter, der die verbrauchsadaptive Reserve ein-/ausschaltet.
+Bei Deaktivierung gelten ausschließlich die statischen Saisonwerte.
+
+---
+
+### Lookback-Tage
+
+**Wirkung:** Wie viele Tage Verbrauchshistorie für die Mittelwertbildung
+herangezogen werden. Längerer Zeitraum = stabilere Reserve, aber langsamer
+anpassend an geänderte Verbrauchsgewohnheiten.
+
+**Empfehlung:** 7–21 Tage. Standard: 14 Tage.
+
+---
+
+### Mindestdaten (Tage)
+
+**Wirkung:** Mindestanzahl Tage mit Daten, bevor die adaptive Reserve wirkt.
+Darunter gilt der statische Fallback.
+
+**Standard:** 7 Tage.
+
+---
+
+### Sicherheitsfaktor
+
+**Wirkung:** Multiplikator auf die berechnete Reserve. Wert > 1.0 erhöht den
+Puffer für Verbrauchsspitzen.
+
+Beispiel: Berechnete Reserve = 20 %, Faktor 1.3 → aktive Reserve = 26 %.
+
+**Empfehlung:** 1.2–1.5. Zu hoch → Akku steht für Optimierung weniger zur Verfügung.
+
+**Standard:** 1.3
+
+---
+
+### Sensoren
+
+- **Notstromreserve (adaptiv):** Berechnete adaptive Reserve für Notstromschutz.
+- **HT-Reserve (adaptiv):** Berechnete adaptive Reserve für das HT-Fenster.
+
+Beide Sensoren sind standardmäßig in der HA Entitäts-Registry deaktiviert und
+müssen dort manuell aktiviert werden, um im Dashboard zu erscheinen.
+""",
+)
+
+SUBVIEW_NOTSTROMRESERVE = help_subview(
+    path="help-notstromreserve",
+    title="Hilfe: Notstromreserve",
+    content="""\
+## Notstromreserve – Parameter
+
+Die Notstromreserve schützt einen Mindest-SoC im Akku für den Fall eines
+Netzausfalls. Maestro entlädt den Akku nie unter diesen Wert, solange die
+Reserve aktiv ist.
+
+Die Reserve wird **tageslängenbasiert** (astrobasiert) zwischen dem Winterwert
+(kürzester Tag) und dem Äquinoktiumswert (Tagundnachtgleiche) interpoliert und
+sinkt im Sommer (längster Tag) weiter auf nahe 0 %. Der Breitengrad wird
+automatisch aus den HA-Systemeinstellungen übernommen.
+
+---
+
+### Reserve Winter (%)
+
+**Wirkung:** Minimaler SoC in den Wintermonaten (Dezember). Maestro verhindert
+Entladung unter diesen Wert.
+
+**Empfehlung:** 15–30 %. Je mehr Verbrauch im Notfall (Heizung, Licht), desto höher.
+
+**Wechselwirkung:** Muss größer oder gleich dem Äquinoktiumswert sein, sonst ist
+die Interpolation invertiert.
+
+**Standard:** 20 %
+
+---
+
+### Reserve Äquinoktium (%)
+
+**Wirkung:** Minimaler SoC zur Tagundnachtgleiche (ca. 21. März / 23. September).
+Die Reserve fällt von diesem Wert zu den Sommermonaten hin weiter ab.
+
+**Empfehlung:** 5–15 %. Im Sommer ist ausreichend PV für schnelle Nachladung
+vorhanden.
+
+**Standard:** 10 %
+""",
+)
+
+# ─── Zusammensetzen & Schreiben ──────────────────────────────────────────────
+
+SUBVIEW_FLAT_CURVE = help_subview(
+    path="help-flat-curve",
+    title="Hilfe: Morning-Cap & Schonladung",
+    content="""\
+## Morning-Cap & Schonladung
+
+Diese Features glätten das Lade-/Entlade-Profil des Akkus und verlängern
+die Lebensdauer durch schonendere Nutzung.
+
+---
+
+### Morning-Cap aktivieren
+
+**Wirkung:** Hält den SoC bis zur eingestellten Uhrzeit (lokal) unterhalb der
+SoC-Grenze. Wenn der Akku bereits voll genug ist (≥ SoC-Grenze), wird keine
+weitere Ladung initiiert – der Akku bleibt für die Nacht-zu-Morgen-Phase
+"leer" genug, um überschüssige PV im Tagesverlauf effizient aufzunehmen.
+
+**Typisches Szenario:** Nachts laden auf Mindest-SoC (z.B. Notstromreserve),
+aber nicht auf 80 %. Dann morgens mit PV den Rest laden.
+
+**Ausnahmen:** Curtailment Guard (Abregelschutz) überschreibt den Morning-Cap
+immer, damit keine Energie verloren geht.
+
+---
+
+### SoC-Deckel (%)
+
+**Wirkung:** Obergrenze für den Morning-Cap. Liegt der aktuelle SoC bei oder
+über diesem Wert und ist die Uhrzeit vor dem "Aktiv bis"-Wert, wird keine
+weitere Ladung zugelassen.
+
+**Empfehlung:** 20–40 % – so bleibt tagsüber ausreichend Puffer für PV.
+
+**Standard:** 30 %
+
+---
+
+### Aktiv bis (Uhr, lokal)
+
+**Wirkung:** Bis zu dieser Uhrzeit (HA-Lokalzeit) ist der Morning-Cap aktiv.
+Danach greift der normale Ladekorridor.
+
+**Empfehlung:** 9–11 Uhr lokal (vor der Mittags-PV-Spitze).
+
+**Standard:** 10 Uhr lokal
+
+---
+
+### Schonladung aktivieren
+
+**Wirkung:** Reduziert die maximale Ladeleistung auf den eingestellten Faktor.
+Schützt die Batterie vor schneller Vollladung (High-Rate-Stress).
+
+**Ausnahmen:** Curtailment Guard, Notfall-Ladung und Einspeisedrosselung
+laden immer mit voller Leistung – Schonladung wird dort ignoriert.
+
+---
+
+### Schonladung Faktor (0.05–1.0)
+
+**Wirkung:** Multiplikator auf die konfigurierte Max-Ladeleistung.
+
+Beispiel: Max-Ladeleistung = 5 000 W, Faktor = 0.35 → max. 1 750 W.
+
+**Empfehlung:** 0.25–0.50 für sanften Betrieb. 1.0 deaktiviert die Drosselung
+effektiv (Schalter bleibt bestimmend).
+
+**Standard:** 0.35 (≈ C/5–C/6 für typische Heimakkus)
+
+---
+""",
+)
+
+# ─── Auto-Optimierung ───────────────────────────────────────────────────────
+
+TAB_9 = """\
+  - title: Auto-Optimierung
+    icon: mdi:brain
+    path: auto
+    cards:
+
+      - type: custom:mushroom-title-card
+        title: Auto-Optimierung
+        subtitle: "Tägliche automatische Strategie-Optimierung"
+
+      - type: entities
+        title: Steuerung
+        show_header_toggle: false
+        entities:
+          - entity: switch.e3dc_maestro_auto_optimierung
+            name: "Auto-Optimierung aktiv"
+          - entity: select.e3dc_maestro_auto_optimierung_ziel
+            name: "Optimierungsziel"
+          - entity: sensor.e3dc_maestro_auto_aktive_strategie
+            name: "Aktive Strategie"
+          - entity: sensor.e3dc_maestro_auto_geschatzte_einsparung
+            name: "Geschätzte Einsparung"
+          - type: button
+            name: "ℹ️  Hilfe zu diesem Abschnitt"
+            icon: mdi:help-circle-outline
+            tap_action:
+              action: navigate
+              navigation_path: /e3dc-maestro/help-auto
+
+      - type: custom:mushroom-template-card
+        primary: "Auto: {{ states('sensor.e3dc_maestro_auto_aktive_strategie') }}"
+        secondary: >-
+          {% set r = state_attr('sensor.e3dc_maestro_auto_aktive_strategie','overrides') %}
+          {% if r %}
+          Cap {{ r.morning_cap_soc }}% · bis {{ r.morning_cap_until_h }}h · Faktor {{ r.gentle_charge_factor }}
+          {% else %}
+          Keine Override-Empfehlung
+          {% endif %}
+        icon: mdi:auto-fix
+        icon_color: >-
+          {% if states('sensor.e3dc_maestro_auto_aktive_strategie') == 'auto' %}green
+          {% elif 'Fallback' in states('sensor.e3dc_maestro_auto_aktive_strategie') %}orange
+          {% else %}grey{% endif %}
+
+"""
+
+SUBVIEW_AUTO = help_subview(
+    path="help-auto",
+    title="Hilfe: Auto-Optimierung",
+    content="""\
+## Auto-Optimierung
+
+Maestro evaluiert einmal täglich (kurz nach Mitternacht) eine Reihe von
+Morning-Cap-Parameter-Kombinationen mit dem Forecast-Simulator als Bewertungsfunktion
+und wählt diejenige Konfiguration, die das gewählte Ziel maximiert.
+
+Manuelle Eingaben (Switches/Number-Entities) **überschreiben das
+Auto-Override sofort** – der Nutzer gewinnt immer.
+
+---
+
+### Optimierungsziele
+
+- **`self_consumption`** (Eigenverbrauch maximieren) — Standard.
+  Maximiert den Anteil PV-Energie, der direkt verbraucht oder im Akku
+  zwischengespeichert wird.
+- **`cost`** (Kosten minimieren) — Bewertet Strombezug zu 0,30 €/kWh
+  vs. Einspeisevergütung 0,08 €/kWh.
+- **`co2`** (CO₂ minimieren) — Bewertet Netzbezug mit 0,4 kg CO₂/kWh
+  (DE Mix-Durchschnitt).
+
+---
+
+### Suchraum (Grid-Search)
+
+| Parameter              | Werte                       |
+|------------------------|-----------------------------|
+| Morning-Cap SoC        | 20 / 30 / 40 / 50 %         |
+| Morning-Cap bis (lokal)| 9 / 10 / 11 / 12 h          |
+| Schonlade-Faktor       | 0.20 / 0.35 / 0.50 / 0.70   |
+
+→ 64 Kombinationen pro Tag.
+
+---
+
+### Sicherheitsbedingungen
+
+- Auto-Override wird **nicht** angewendet, wenn die simulierte minimale
+  SoC-Trajektorie unter `adaptive_reserve_min_soc` (mindestens 5 %) fallen
+  würde.
+- Bei < 7 Tagen Verbrauchs- oder PV-Historie greift der Fallback (manueller
+  Modus).
+
+---
+
+### Status-Sensor
+
+`sensor.e3dc_maestro_auto_aktive_strategie` zeigt:
+
+- **`manuell`** — Auto deaktiviert.
+- **`manuell (Fallback)`** — Auto aktiv, aber kein gültiges Override
+  (zu wenig Daten oder kein besserer Score gefunden).
+- **`auto`** — Override aktiv, Morning-Cap-Parameter werden überschrieben.
+
+Attribute des Sensors: `objective`, `last_run`, `fallback_reason`,
+`overrides`, `grid_size`, `estimated_savings_pct`.
+
+---
+""",
+)
+
+YAML = (
+    "# E3DC Maestro – Dashboard\n"
+    "# Voraussetzungen: mushroom-cards (HACS → Frontend)\n"
+    "# Generiert von scripts/write_dashboard.py\n\n"
+    "title: E3DC Maestro\n"
+    "views:\n\n"
+    + TAB_1
+    + TAB_2
+    + TAB_3
+    + TAB_4
+    + TAB_5
+    + TAB_6
+    + TAB_7
+    + TAB_8
+    + TAB_9
+    # Hilfe-Subviews (subview: true → kein Tab-Eintrag)
+    + SUBVIEW_LADEKORRIDOR
+    + SUBVIEW_SPREADING
+    + SUBVIEW_CURTAILMENT
+    + SUBVIEW_TWO_TIER
+    + SUBVIEW_ASTRO
+    + SUBVIEW_HT
+    + SUBVIEW_TARIF
+    + SUBVIEW_WALLBOX
+    + SUBVIEW_EVCC
+    + SUBVIEW_WP
+    + SUBVIEW_VORENTLADUNG
+    + SUBVIEW_HARDWARE
+    + SUBVIEW_STEUERVERHALTEN
+    + SUBVIEW_NOTSTROMRESERVE
+    + SUBVIEW_TARIFF_SLOTS
+    + SUBVIEW_ADAPTIVE_RESERVE
+    + SUBVIEW_FLAT_CURVE
+    + SUBVIEW_AUTO
+)
+
+out = pathlib.Path("dashboards/maestro_dashboard.yaml")
+out.write_text(YAML, encoding="utf-8")
+print(f"Written {len(YAML.splitlines())} lines to {out}")
+

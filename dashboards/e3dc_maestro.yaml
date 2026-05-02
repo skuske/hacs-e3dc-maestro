@@ -1,0 +1,237 @@
+title: E3DC Maestro
+views:
+
+  # ════════════════════════════════════════════════════════
+  # TAB 1: ÜBERSICHT / MONITORING
+  # ════════════════════════════════════════════════════════
+  - title: Übersicht
+    icon: mdi:view-dashboard
+    cards:
+
+      # ── Aktueller Status ──────────────────────────────
+      - type: entities
+        title: Status
+        entities:
+          - entity: sensor.e3dc_maestro_regelphase
+            name: Regelphase
+          - entity: switch.e3dc_maestro_regelung_aktiv
+            name: Regelung aktiv
+          - entity: binary_sensor.e3dc_maestro_e3dc_erreichbar
+            name: E3DC erreichbar
+          - entity: binary_sensor.e3dc_maestro_einspeisedrosselung_aktiv
+          - entity: binary_sensor.e3dc_maestro_ht_schutz_aktiv
+          - entity: binary_sensor.e3dc_maestro_notfallladung_aktiv
+
+      # ── Gauge: SoC vs. Ziel ───────────────────────────
+      - type: horizontal-stack
+        cards:
+          - type: gauge
+            entity: sensor.e3dc_maestro_ziel_soc
+            name: Ziel-SoC
+            min: 0
+            max: 100
+            needle: true
+            severity:
+              green: 70
+              yellow: 40
+              red: 0
+          - type: gauge
+            entity: sensor.e3dc_maestro_ziel_ladeleistung
+            name: Ziel-Ladeleistung
+            min: 0
+            max: 9000
+            needle: true
+            unit: W
+            severity:
+              green: 1000
+              yellow: 300
+              red: 0
+
+      # ── SoC-Verlauf (24 h) ────────────────────────────
+      - type: history-graph
+        title: SoC-Verlauf 24 h
+        hours_to_show: 24
+        entities:
+          - entity: sensor.e3dc_maestro_ziel_soc
+            name: Ziel-SoC
+          # Ergänze hier deinen echten SoC-Sensor aus e3dc_rscp:
+          # - entity: sensor.e3dc_soc
+          #   name: Ist-SoC
+
+      # ── Letzte Aktion ─────────────────────────────────
+      - type: markdown
+        title: Letzte Aktion
+        content: >
+          **Phase:** {{ states('sensor.e3dc_maestro_letzte_aktion') }}
+
+          **Grund:** {{ state_attr('sensor.e3dc_maestro_letzte_aktion', 'reason') }}
+
+          **Zeitpunkt:** {{ state_attr('sensor.e3dc_maestro_letzte_aktion', 'timestamp') }}
+
+          **Modus:** {{ state_attr('sensor.e3dc_maestro_letzte_aktion', 'power_mode') }}
+
+          **Ladeleistung:** {{ state_attr('sensor.e3dc_maestro_letzte_aktion', 'charge_power_limit') }} W
+
+      # ── Tagesstatistik ────────────────────────────────
+      - type: entities
+        title: Tagesstatistik
+        entities:
+          - entity: sensor.e3dc_maestro_geladen_heute
+            name: Geladen heute
+          - entity: sensor.e3dc_maestro_entladen_heute
+            name: Entladen heute
+          - entity: sensor.e3dc_maestro_einspeise_eingriffe_heute
+            name: Einspeise-Eingriffe heute
+
+      # ── PV-Prognose / Ladeverzögerung ─────────────────
+      - type: conditional
+        conditions:
+          - entity: sensor.e3dc_maestro_regelphase
+            state: pv_delay
+        card:
+          type: markdown
+          title: PV-Prognose aktiv
+          content: >
+            ☀️ **Korridor-Ladung wird ausgesetzt**, weil die heutige
+            PV-Restprognose ausreicht, um den Akku auf das Ziel-SoC zu bringen.
+
+            **Grund:** {{ state_attr('sensor.e3dc_maestro_letzte_aktion', 'reason') }}
+
+  # ════════════════════════════════════════════════════════
+  # TAB 2: EINSTELLUNGEN (Settings-Page)
+  # ════════════════════════════════════════════════════════
+  - title: Einstellungen
+    icon: mdi:tune
+    cards:
+
+      # ── Master-Controls ───────────────────────────────
+      - type: entities
+        title: Hauptsteuerung
+        entities:
+          - entity: switch.e3dc_maestro_regelung_aktiv
+          - entity: switch.e3dc_maestro_debug_logging
+          - entity: button.e3dc_maestro_limits_jetzt_freigeben
+          - entity: button.e3dc_maestro_manuell_laden_3_kwh
+          - entity: button.e3dc_maestro_statistik_zurucksetzen
+
+      # ── System ───────────────────────────────────────
+      - type: entities
+        title: System
+        entities:
+          - entity: number.e3dc_maestro_powerfaktor
+          - entity: number.e3dc_maestro_wr_leistung
+          - entity: number.e3dc_maestro_max_ladeleistung
+          - entity: number.e3dc_maestro_min_ladeleistung
+          - entity: number.e3dc_maestro_installierte_pv_leistung
+          - entity: number.e3dc_maestro_einspeisegrenze
+          - entity: number.e3dc_maestro_aktualisierungsintervall
+
+      # ── Saison & Ladekorridor ─────────────────────────
+      - type: entities
+        title: Saison & Ladekorridor
+        entities:
+          - entity: number.e3dc_maestro_ladeschwelle
+          - entity: number.e3dc_maestro_ladeende_soc
+          - entity: number.e3dc_maestro_ladeende_winter
+          - entity: number.e3dc_maestro_ladeende_sommer
+          - entity: number.e3dc_maestro_sommerladeende_ziel
+
+      # ── HT/NT-Schutz ─────────────────────────────────
+      - type: entities
+        title: HT/NT-Schutz
+        entities:
+          - entity: switch.e3dc_maestro_ht_nt_schutz
+          - entity: number.e3dc_maestro_ht_beginn
+          - entity: number.e3dc_maestro_ht_ende
+          - entity: number.e3dc_maestro_ht_reserve_winter
+          - entity: number.e3dc_maestro_ht_sockel_aquinoktium
+          - entity: switch.e3dc_maestro_ht_samstag
+          - entity: switch.e3dc_maestro_ht_sonntag
+
+      # ── Dynamische Tarife ─────────────────────────────
+      - type: entities
+        title: Dynamische Tarife
+        entities:
+          - entity: number.e3dc_maestro_gunstig_schwelle
+          - entity: number.e3dc_maestro_max_netzladung_tag
+
+      # ── Wallbox ───────────────────────────────────────
+      - type: entities
+        title: Wallbox
+        entities:
+          - entity: switch.e3dc_maestro_wallbox_regelung
+          - entity: select.e3dc_maestro_wallbox_typ
+          - entity: number.e3dc_maestro_wallbox_min_strom
+          - entity: number.e3dc_maestro_wallbox_max_strom
+          - entity: number.e3dc_maestro_wallbox_mindest_uberschuss
+
+      # ── Wärmepumpe ────────────────────────────────────
+      - type: entities
+        title: Wärmepumpe
+        entities:
+          - entity: switch.e3dc_maestro_warmepumpen_regelung
+          - entity: number.e3dc_maestro_wp_mindest_uberschuss
+          - entity: number.e3dc_maestro_wp_max_preis
+          - entity: number.e3dc_maestro_wp_mindestlaufzeit
+          - entity: number.e3dc_maestro_wp_mindestpause
+
+      # ── PV-Prognose ───────────────────────────────────
+      - type: markdown
+        title: PV-Prognose / Ladeverzögerung
+        content: >
+          Die PV-Prognose-Einstellungen werden über **Einstellungen →
+          Geräte & Dienste → E3DC Maestro → Konfigurieren** verwaltet
+          (Schritt *PV-Prognose / Ladeverzögerung*).
+
+          Dort lassen sich aktivieren / festlegen:
+
+          - PV-Prognose verwenden (an/aus)
+          - Forecast-Sensor (z. B. `sensor.energy_production_today_remaining`)
+          - Schwelle (kWh), ab der die Korridor-Ladung ausgesetzt wird
+          - Akku-Kapazität (kWh) für die Bedarfsberechnung
+          - Sicherheitsfaktor (Reserve auf den errechneten Bedarf)
+
+          Aktive Verzögerung wird in der Übersicht als Phase **`pv_delay`**
+          angezeigt.
+
+      # ── Failsafe ──────────────────────────────────────
+      - type: entities
+        title: Failsafe & Watchdog
+        entities:
+          - entity: number.e3dc_maestro_watchdog_timeout
+
+  # ════════════════════════════════════════════════════════
+  # TAB 3: DIAGNOSE
+  # ════════════════════════════════════════════════════════
+  - title: Diagnose
+    icon: mdi:stethoscope
+    cards:
+
+      - type: entities
+        title: Live-Status
+        entities:
+          - entity: sensor.e3dc_maestro_regelphase
+          - entity: sensor.e3dc_maestro_ziel_ladeleistung
+          - entity: sensor.e3dc_maestro_ziel_soc
+          - entity: binary_sensor.e3dc_maestro_e3dc_erreichbar
+
+      - type: history-graph
+        title: Regelphase Verlauf 48 h
+        hours_to_show: 48
+        entities:
+          - entity: sensor.e3dc_maestro_regelphase
+            name: Phase
+
+      - type: history-graph
+        title: Ziel-Ladeleistung Verlauf
+        hours_to_show: 24
+        entities:
+          - entity: sensor.e3dc_maestro_ziel_ladeleistung
+            name: Ziel-Ladeleistung
+
+      - type: entities
+        title: Debug-Log
+        entities:
+          - entity: switch.e3dc_maestro_debug_logging
+          - entity: sensor.e3dc_maestro_debug_log
+            name: Letzte Log-Einträge

@@ -1,0 +1,216 @@
+"""F3: Auto-Optimierer.
+
+Grid-search over the F0 flat-curve parameters using the F1 forecast simulator
+as the objective function. Runs at most once per day (after midnight) in the
+coordinator, see ``_async_maybe_run_optimizer``.
+
+The result is a ``MaestroParams`` *override* that the coordinator applies on
+top of the user's manual configuration. Manual writes (entity service calls)
+invalidate the override immediately so the user always wins.
+"""
+from __future__ import annotations
+
+import dataclasses
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any
+
+from .control_engine import MaestroParams
+from .forecast import simulate_next_24h, ForecastResult
+
+_LOGGER = logging.getLogger(__name__)
+
+OBJECTIVE_SELF_CONSUMPTION = "self_consumption"
+OBJECTIVE_COST = "cost"
+OBJECTIVE_CO2 = "co2"
+OBJECTIVES = (OBJECTIVE_SELF_CONSUMPTION, OBJECTIVE_COST, OBJECTIVE_CO2)
+
+# Grid-search space.
+# Extended cap-soc/until-h ranges capture high-PV summer days where keeping
+# headroom until noon avoids midday curtailment.
+# Gentle-factor 1.0 = schonladung switch off (full power allowed).
+_MORNING_CAP_SOC_GRID = (20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0)
+_MORNING_CAP_UNTIL_H_GRID = (7.0, 8.0, 9.0, 10.0, 11.0, 12.0)
+_GENTLE_FACTOR_GRID = (0.2, 0.35, 0.5, 0.7, 1.0)
+
+# Cost / CO2 model coefficients (typical DE values, May 2026)
+_GRID_BUY_PRICE = 0.30      # €/kWh
+_GRID_SELL_PRICE = 0.08     # €/kWh feed-in
+_GRID_CO2_KG_PER_KWH = 0.4  # kg CO2 per kWh (DE mix avg)
+
+
+@dataclass
+class OptimizerResult:
+    best_params: MaestroParams
+    best_score: float
+    objective: str
+    estimated_savings_pct: float = 0.0
+    grid_size: int = 0
+    fallback: bool = False
+    fallback_reason: str | None = None
+    # Description of which parameters changed vs. base
+    overrides: dict[str, Any] = field(default_factory=dict)
+    forecast: ForecastResult | None = None
+
+
+def _score(result: ForecastResult, objective: str) -> float:
+    """Higher is better for all objectives (we negate cost/CO2).
+
+    Curtailment (pv_curtailed_kwh) is penalised in every objective because
+    it represents PV energy that cannot be used regardless of strategy choice.
+    A higher cap-soc combined with a later cap-until-h keeps battery headroom
+    for the midday peak and reduces curtailment losses.
+    """
+    curtailed = result.pv_curtailed_kwh
+    if objective == OBJECTIVE_SELF_CONSUMPTION:
+        ss = result.self_sufficiency or 0.0
+        # Penalise grid draw (not covered by own PV/battery) and curtailment
+        # (PV that could have been stored but battery was full)
+        return ss * 100.0 - result.grid_draw_kwh * 0.5 - curtailed * 1.5
+    if objective == OBJECTIVE_COST:
+        cost = result.grid_draw_kwh * _GRID_BUY_PRICE - result.grid_feed_in_kwh * _GRID_SELL_PRICE
+        # Curtailed PV = lost feed-in income
+        return -cost - curtailed * _GRID_SELL_PRICE
+    if objective == OBJECTIVE_CO2:
+        # Curtailed PV could have displaced grid CO2
+        return -(result.grid_draw_kwh * _GRID_CO2_KG_PER_KWH) - curtailed * _GRID_CO2_KG_PER_KWH
+    return 0.0
+
+
+def _build_candidate(
+    base: MaestroParams, cap_soc: float, until_h: float, gentle_factor: float
+) -> MaestroParams:
+    """Return a copy of ``base`` with F0 params overridden."""
+    return dataclasses.replace(
+        base,
+        morning_cap_enabled=True,
+        morning_cap_soc=cap_soc,
+        morning_cap_until_h=until_h,
+        gentle_charge_enabled=True,
+        gentle_charge_factor=gentle_factor,
+    )
+
+
+def run_optimizer(
+    *,
+    base_params: MaestroParams,
+    soc: float,
+    consumption_h: list[float],
+    pv_h: list[float],
+    battery_capacity_kwh: float,
+    regelung_aktiv: bool,
+    max_discharge_power: float,
+    objective: str,
+    now: datetime,
+    consumption_data_days: int = 0,
+    pv_data_days: int = 0,
+    min_data_days: int = 7,
+) -> OptimizerResult:
+    """Evaluate the F0 grid and return the best ``MaestroParams`` override.
+
+    Falls back to ``base_params`` (no override) if data quality is insufficient.
+    """
+    if objective not in OBJECTIVES:
+        objective = OBJECTIVE_SELF_CONSUMPTION
+
+    # Data-quality fallback: refuse to optimise on weak history
+    if consumption_data_days < min_data_days or pv_data_days < min_data_days:
+        return OptimizerResult(
+            best_params=base_params,
+            best_score=0.0,
+            objective=objective,
+            fallback=True,
+            fallback_reason=(
+                f"insufficient_history "
+                f"(consumption={consumption_data_days}d, pv={pv_data_days}d, "
+                f"required={min_data_days}d)"
+            ),
+        )
+
+    reserve_floor = max(
+        getattr(base_params, "adaptive_reserve_min_soc", 5.0),
+        5.0,
+    )
+
+    # Baseline: no F0 override → reference for savings %
+    try:
+        baseline = simulate_next_24h(
+            soc=soc,
+            consumption_h=consumption_h,
+            pv_h=pv_h,
+            params=base_params,
+            now=now,
+            battery_capacity_kwh=battery_capacity_kwh,
+            regelung_aktiv=regelung_aktiv,
+            max_discharge_power=max_discharge_power,
+        )
+    except Exception as err:  # pragma: no cover - defensive
+        _LOGGER.warning("Optimizer baseline failed: %s", err)
+        return OptimizerResult(
+            best_params=base_params,
+            best_score=0.0,
+            objective=objective,
+            fallback=True,
+            fallback_reason=f"baseline_error: {err}",
+        )
+
+    baseline_score = _score(baseline, objective)
+    best_score = baseline_score
+    best_params = base_params
+    best_forecast = baseline
+    grid_size = 0
+
+    for cap_soc in _MORNING_CAP_SOC_GRID:
+        # Safety: skip combinations that would let SoC fall below reserve
+        if cap_soc < reserve_floor:
+            continue
+        for until_h in _MORNING_CAP_UNTIL_H_GRID:
+            for gentle_factor in _GENTLE_FACTOR_GRID:
+                grid_size += 1
+                candidate = _build_candidate(base_params, cap_soc, until_h, gentle_factor)
+                try:
+                    fc = simulate_next_24h(
+                        soc=soc,
+                        consumption_h=consumption_h,
+                        pv_h=pv_h,
+                        params=candidate,
+                        now=now,
+                        battery_capacity_kwh=battery_capacity_kwh,
+                        regelung_aktiv=regelung_aktiv,
+                        max_discharge_power=max_discharge_power,
+                    )
+                except Exception as err:  # pragma: no cover - defensive
+                    _LOGGER.debug("Optimizer candidate failed: %s", err)
+                    continue
+                # Safety: never violate reserve
+                if fc.min_soc < reserve_floor:
+                    continue
+                score = _score(fc, objective)
+                if score > best_score:
+                    best_score = score
+                    best_params = candidate
+                    best_forecast = fc
+
+    # Estimate savings vs. baseline (in % of baseline magnitude)
+    if baseline_score == 0:
+        estimated = 0.0
+    else:
+        estimated = (best_score - baseline_score) / abs(baseline_score) * 100.0
+
+    overrides: dict[str, Any] = {}
+    if best_params is not base_params:
+        for fld in ("morning_cap_enabled", "morning_cap_soc", "morning_cap_until_h",
+                    "gentle_charge_enabled", "gentle_charge_factor"):
+            overrides[fld] = getattr(best_params, fld)
+
+    return OptimizerResult(
+        best_params=best_params,
+        best_score=best_score,
+        objective=objective,
+        estimated_savings_pct=round(estimated, 2),
+        grid_size=grid_size,
+        fallback=False,
+        overrides=overrides,
+        forecast=best_forecast,
+    )
