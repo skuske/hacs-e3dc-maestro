@@ -18,6 +18,7 @@ from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -223,7 +224,7 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.last_phase: str = PHASE_OFF
         self.last_action_info: dict[str, Any] = {}
 
-        # Statistics (reset at midnight)
+        # Statistics (reset at midnight, persisted across restarts)
         self.stats: dict[str, float] = {
             STAT_CHARGED_TODAY: 0.0,
             STAT_DISCHARGED_TODAY: 0.0,
@@ -233,6 +234,12 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             STAT_PV_SAVED: 0.0,
         }
         self._last_stats_date: str | None = None
+        # Persistence: store stats in HA's .storage so a restart preserves
+        # daily counters until the next midnight reset.
+        self._stats_store: Store = Store(
+            hass, version=1, key=f"{DOMAIN}_stats_{entry.entry_id}"
+        )
+        self._stats_dirty: bool = False
 
         # Failsafe / watchdog
         self._consecutive_failures: int = 0
@@ -376,12 +383,17 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         opts = self.entry.options
         now = dt_util.now()
 
+        # Restore persisted stats on first run after restart (before midnight reset).
+        if self._last_stats_date is None:
+            await self._async_load_stats()
+
         # Reset daily statistics at midnight
         today_str = now.strftime("%Y-%m-%d")
         if self._last_stats_date != today_str:
             self.stats = {k: 0.0 for k in self.stats}
             self._last_stats_date = today_str
             self._watchdog_notified = False
+            self._stats_dirty = True
 
         # Read sensor values
         try:
@@ -594,6 +606,14 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.stats[STAT_FEED_IN_AVOIDED] += kwh
                 self.stats[STAT_PV_SAVED] += kwh
 
+        # Persist stats roughly once per minute so a restart preserves
+        # daily counters. Throttled via _last_stats_save to avoid disk thrash.
+        self._stats_dirty = True
+        last_save = getattr(self, "_last_stats_save", None)
+        if last_save is None or (now - last_save).total_seconds() >= 60:
+            self._last_stats_save = now
+            await self._async_save_stats()
+
         return {
             "decision": decision,
             "state": state_data,
@@ -603,7 +623,44 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_shutdown(self) -> None:
         """Release limits when integration is unloaded."""
+        # Persist stats before shutdown so a restart preserves daily counters
+        await self._async_save_stats()
         await self._async_release_limits("Integration entladen")
+
+    async def _async_load_stats(self) -> None:
+        """Load persisted stats from disk (called once during first refresh)."""
+        try:
+            data = await self._stats_store.async_load()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Stats konnten nicht geladen werden: %s", err)
+            return
+        if not data:
+            return
+        stored_date = data.get("date")
+        today_str = dt_util.now().strftime("%Y-%m-%d")
+        if stored_date != today_str:
+            # Stale data from a previous day → ignore so the midnight reset
+            # path stays authoritative
+            return
+        stored_stats = data.get("stats")
+        if isinstance(stored_stats, dict):
+            for key in self.stats:
+                if key in stored_stats:
+                    self.stats[key] = stored_stats[key]
+            self._last_stats_date = stored_date
+
+    async def _async_save_stats(self) -> None:
+        """Persist current stats to disk."""
+        try:
+            await self._stats_store.async_save(
+                {
+                    "date": self._last_stats_date,
+                    "stats": dict(self.stats),
+                }
+            )
+            self._stats_dirty = False
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Stats konnten nicht gesichert werden: %s", err)
 
     # ──────────────────────────────────────────────────────────────────────────    # C1 + B1: Computed properties used by sensor platform
     # ──────────────────────────────────────────────────────────────────────────────

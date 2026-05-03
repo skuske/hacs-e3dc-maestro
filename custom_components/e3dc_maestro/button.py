@@ -73,3 +73,4 @@ class MaestroResetStatsButton(CoordinatorEntity[E3DCMaestroCoordinator], ButtonE
         for key in self.coordinator.stats:
             self.coordinator.stats[key] = 0.0
         self.coordinator._log("Statistik manuell zurückgesetzt")
+        await self.coordinator._async_save_stats()

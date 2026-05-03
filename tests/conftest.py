@@ -43,6 +43,7 @@ _HA_STUBS = [
     ("homeassistant.helpers.entity_platform", {}),
     ("homeassistant.helpers.entity_registry", {}),
     ("homeassistant.helpers.selector", {}),
+    ("homeassistant.helpers.storage", {"Store": object}),
     ("homeassistant.helpers.update_coordinator", {}),
     ("homeassistant.components", {}),
     ("homeassistant.components.sensor", {}),
