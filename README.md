@@ -404,11 +404,11 @@ Diese Sensoren sind nach der Installation **deaktiviert** (erscheinen grau in de
 
 | Entity-ID | Name | Beschreibung |
 |---|---|---|
-| `sensor.e3dc_maestro_einspeiselimit_gesichert_heute` | Einspeiselimit gesichert heute | Energie die durch Einspeiselimit-Eingriff gesichert wurde (Detailwert von `pv_verlust_verhindert`) |
+| `sensor.e3dc_maestro_abregelung_verhindert_heute` | Abregelung verhindert heute | Energie die durch Einspeiselimit-Eingriff (70%-Regel) gesichert wurde (Detailwert von `pv_verlust_verhindert`) |
+| `sensor.e3dc_maestro_dc_abregelung_verhindert_heute` | DC-Abregelung verhindert heute | Energie die durch Curtailment Guard (DC-seitige Überdimensionierung) gesichert wurde (Detailwert von `pv_verlust_verhindert`) |
 | `sensor.e3dc_maestro_notstromreserve_aktuell` | Notstromreserve (aktuell) | Aktuell berechneter Reserve-SoC (saisonal interpoliert) |
 | `sensor.e3dc_maestro_notstromreserve_adaptiv` | Notstromreserve (adaptiv) | Verbrauchsadaptiv berechnete Reserve |
 | `sensor.e3dc_maestro_ht_reserve_adaptiv` | HT-Reserve (adaptiv) | Adaptiv berechnete HT-Reserve |
-| `sensor.e3dc_maestro_abregelung_verhindert_heute` | Abregelung verhindert heute | Energie die durch Abregelschutz gesichert wurde (Detailwert von `pv_verlust_verhindert`) |
 | `sensor.e3dc_maestro_debug_log` | Debug-Log | Letzte 5 Regel-Logeinträge; nur sinnvoll wenn Debug-Logging eingeschaltet ist |
 
 ---

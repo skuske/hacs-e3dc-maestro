@@ -236,6 +236,7 @@
       "adaptive_reserve_soc": { "name": "Notstromreserve (adaptiv)" },
       "adaptive_ht_reserve_soc": { "name": "HT-Reserve (adaptiv)" },
       "curtailment_avoided_today": { "name": "Abregelung verhindert heute" },
+      "feed_in_avoided_today": { "name": "DC-Abregelung verhindert heute" },
       "seasonal_charge_end": { "name": "Saisonales Ladeende (Uhrzeit)" },
       "forecast_min_soc": { "name": "Forecast: Min-SoC n\u00e4chste 24h" },
       "forecast_max_soc": { "name": "Forecast: Max-SoC n\u00e4chste 24h" },

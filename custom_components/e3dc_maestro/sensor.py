@@ -85,13 +85,13 @@ SENSOR_DESCRIPTIONS: tuple[MaestroSensorDescription, ...] = (
     ),
     MaestroSensorDescription(
         key="feed_in_avoided_today",
-        name="Einspeiselimit gesichert heute",
+        name="DC-Abregelung verhindert heute",
         icon="mdi:transmission-tower-import",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
         state_class=SensorStateClass.TOTAL_INCREASING,
         entity_registry_enabled_default=False,
-        value_fn=lambda coord: round(coord.stats.get("feed_in_avoided_today_kwh", 0), 3),
+        value_fn=lambda coord: round(coord.stats.get("curtailment_avoided_today_kwh", 0), 3),
     ),
     MaestroSensorDescription(
         key="pv_saved_today",
@@ -177,7 +177,7 @@ SENSOR_DESCRIPTIONS: tuple[MaestroSensorDescription, ...] = (
         device_class=SensorDeviceClass.ENERGY,
         state_class=SensorStateClass.TOTAL_INCREASING,
         entity_registry_enabled_default=False,
-        value_fn=lambda coord: round(coord.stats.get("curtailment_avoided_today_kwh", 0), 3),
+        value_fn=lambda coord: round(coord.stats.get("feed_in_avoided_today_kwh", 0), 3),
     ),
     # Phase 5: Seasonal charge-end hour
     MaestroSensorDescription(
