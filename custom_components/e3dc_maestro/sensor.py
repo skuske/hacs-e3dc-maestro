@@ -176,7 +176,6 @@ SENSOR_DESCRIPTIONS: tuple[MaestroSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
         state_class=SensorStateClass.TOTAL_INCREASING,
-        entity_registry_enabled_default=False,
         value_fn=lambda coord: round(coord.stats.get("feed_in_avoided_today_kwh", 0), 3),
     ),
     # Phase 5: Seasonal charge-end hour

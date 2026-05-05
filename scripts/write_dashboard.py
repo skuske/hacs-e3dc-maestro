@@ -241,8 +241,8 @@ TAB_1 = """\
             tap_action:
               action: more-info
           - type: custom:mushroom-entity-card
-            entity: sensor.e3dc_maestro_abregelung_verhindert_heute
-            name: Abregelung verhindert
+            entity: sensor.e3dc_maestro_einspeiselimit_gesichert_heute
+            name: Einspeiselimit gesichert
             icon: mdi:shield-check
             icon_color: teal
             tap_action:
@@ -333,8 +333,8 @@ TAB_1 = """\
             name: Geladen (kWh)
           - entity: sensor.e3dc_maestro_entladen_heute
             name: Entladen (kWh)
-          - entity: sensor.e3dc_maestro_abregelung_verhindert_heute
-            name: Abregelung verhindert (kWh)
+          - entity: sensor.e3dc_maestro_einspeiselimit_gesichert_heute
+            name: Einspeiselimit gesichert (kWh)
 
       - type: custom:mushroom-title-card
         title: 24h SoC-Prognose
@@ -893,8 +893,8 @@ TAB_7 = """\
             name: Notstromreserve (aktuell, %)
           - entity: sensor.e3dc_maestro_saisonales_ladeende_stunde
             name: Saisonales Ladeende (Uhrzeit)
-          - entity: sensor.e3dc_maestro_abregelung_verhindert_heute
-            name: Abregelung verhindert (kWh heute)
+          - entity: sensor.e3dc_maestro_einspeiselimit_gesichert_heute
+            name: Einspeiselimit gesichert (kWh heute)
 
       - type: entities
         title: Debug
