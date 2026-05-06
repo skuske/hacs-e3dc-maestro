@@ -81,6 +81,7 @@ from .const import (
     PHASE_MORNING_CAP,
     PHASE_MORNING_DISCHARGE,
     PHASE_OFF,
+    PHASE_PV_DELAY,
     POWER_MODE_NORMAL,
     SERVICE_CLEAR_POWER_LIMITS,
     SERVICE_MANUAL_CHARGE,
@@ -841,6 +842,39 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         minutes = round((h - hours) * 60)
         if minutes == 60:
             hours += 1
+            minutes = 0
+        return f"{hours:02d}:{minutes:02d}"
+
+    @property
+    def pv_delay_charge_start_str(self) -> str | None:
+        """Voraussichtlicher Ladestart bei aktiver PV-Verzögerung als HH:MM.
+
+        Liefert None, wenn die aktuelle Phase nicht ``pv_delay`` ist oder
+        keine Forecast-Trajektorie vorliegt. Andernfalls wird die erste
+        Stunde aus ``forecast.trajectory_phases`` zurückgegeben, in der
+        Maestro nicht mehr verzögert. Findet sich in den nächsten 24 h
+        keine andere Phase, fällt das Ergebnis auf das saisonale Ladeende
+        zurück (späteste Reserveladung).
+        """
+        if self.last_decision is None or self.last_decision.phase != PHASE_PV_DELAY:
+            return None
+        now = dt_util.now()
+        # Default-Fallback: saisonales Ladeende (späteste Reserve-Ladung)
+        fallback_h = _seasonal_charge_end_hour(now, self._params)
+        target_h: float | None = None
+        if self.forecast is not None and self.forecast.trajectory_phases:
+            base = now.replace(minute=0, second=0, microsecond=0)
+            for i, phase in enumerate(self.forecast.trajectory_phases):
+                if phase != PHASE_PV_DELAY:
+                    ts = base + timedelta(hours=i + 1)
+                    target_h = ts.hour + ts.minute / 60
+                    break
+        if target_h is None:
+            target_h = fallback_h
+        hours = int(target_h)
+        minutes = round((target_h - hours) * 60)
+        if minutes == 60:
+            hours = (hours + 1) % 24
             minutes = 0
         return f"{hours:02d}:{minutes:02d}"
 

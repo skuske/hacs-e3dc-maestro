@@ -126,6 +126,20 @@ views:
         tap_action:
           action: more-info
 
+      - type: conditional
+        conditions:
+          - condition: state
+            entity: sensor.e3dc_maestro_regelphase
+            state: pv_delay
+        card:
+          type: custom:mushroom-entity-card
+          entity: sensor.e3dc_maestro_verzogerter_ladestart_heute
+          name: Verzögerter Ladestart
+          icon: mdi:clock-alert-outline
+          icon_color: light-green
+          layout: horizontal
+          tap_action:
+            action: more-info
       - type: vertical-stack
         cards:
           - type: entities

@@ -205,6 +205,13 @@ SENSOR_DESCRIPTIONS: tuple[MaestroSensorDescription, ...] = (
         icon="mdi:clock-start",
         value_fn=lambda coord: coord.tomorrow_charge_start_str,
     ),
+    # PV-Verzögerung: voraussichtlicher Ladestart heute
+    MaestroSensorDescription(
+        key="pv_delay_charge_start",
+        name="Verzögerter Ladestart heute",
+        icon="mdi:clock-alert-outline",
+        value_fn=lambda coord: coord.pv_delay_charge_start_str,
+    ),
     # F1: 24h Forecast sensors (enabled by default; return unknown until ≥7d history available)
     MaestroSensorDescription(
         key="forecast_min_soc",
