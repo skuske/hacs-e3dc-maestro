@@ -62,6 +62,7 @@ E3DC Maestro läuft vollständig **lokal und ohne Cloud-Verbindung**. Es ergänz
 | **Erzwungene Entladung** | Dashboard-Schalter für manuelle Entladung, z. B. um vor einem Tibber-Niedrigpreisfenster Kapazität zu schaffen |
 | **Regelungs-Cockpit** | Live Command Center mit Hero-Status, KPI-Kacheln, „Aktiv jetzt"-Chips, 24 h Phasenverlauf und „Warum diese Entscheidung?" |
 | **Entscheidungs-Erklärung** | Sensor `decision_explanation` mit vollständigem deutschen Erklärungssatz pro Regelphase (alle 17 Phasen) |
+| **Anti-Flapping** | EWMA-Glättung von PV/Last (τ = 60 s, Jump-Reset bei 2 kW) + Feed-in-Limit-Hysterese + pv_delay-Cooldown verhindern schnelles Phasen-Pendeln |
 | **173 automatisierte Tests** | Control-Engine, Forecast-Simulator und Optimizer vollständig abgedeckt |
 
 ---
@@ -470,6 +471,7 @@ Alle Switches können im Dashboard, in Automationen und über die UI bedient wer
 | `switch.e3dc_maestro_schonladung_reduzierte_ladeleistung` | Schonladung | Reduzierte Ladeleistung für Akkuschonung |
 | `switch.e3dc_maestro_auto_optimierung` | Auto-Optimierung | Grid-Search-Optimizer ein/aus |
 | `switch.e3dc_maestro_hard_soc_limit_akku_deckel` | Hard-SoC-Limit | Fester Lade-Deckel ein/aus |
+| `switch.e3dc_maestro_vorausschauende_ladung` | Vorausschauende Ladung | Hebt das heutige Ladeziel an, wenn morgen wenig PV erwartet wird |
 
 ---
 
@@ -690,6 +692,22 @@ Nur aktiv wenn entweder `curtailment_guard` oder `feed_in_limit` aktiv war. Prü
 
 1. `switch.e3dc_maestro_debug_logging` aktivieren
 2. Sensor `sensor.e3dc_maestro_debug_log` manuell aktivieren (ist standardmäßig deaktiviert)
+
+Für detaillierte `[decide]`-Logzeilen (eine pro Regelzyklus, inkl. EWMA-geglätteter PV/Last-Werte, aktueller Phase und Begründung) folgendes in `configuration.yaml` ergänzen und HA neu starten:
+
+```yaml
+logger:
+  logs:
+    custom_components.e3dc_maestro: debug
+```
+
+Die Zeilen sehen so aus:
+
+```
+[decide] phase=corridor pv=4520W(ewma) house=890W(ewma) grid=-2510W bat=1120W soc=62% reason=Ladekorridor: SoC 62% → Ziel 75%, Leistung 1120W
+```
+
+Ideal um nachzuvollziehen warum eine bestimmte Phase zu einem Zeitpunkt aktiv war.
 
 ### Auto-Optimierung bleibt auf „Daten-Fallback"
 

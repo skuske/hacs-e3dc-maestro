@@ -62,6 +62,7 @@ E3DC Maestro runs entirely **local and without any cloud connection**. It extend
 | **Forced discharge** | Dashboard switch for manual discharge, e.g. before a Tibber low-price window |
 | **Control cockpit** | Live command centre with hero status, KPI tiles, active-now chips, 24 h phase history and "Why this decision?" |
 | **Decision explanation** | `decision_explanation` sensor with a full plain-text explanation for every phase |
+| **Anti-flapping** | EWMA smoothing of PV/load (τ = 60 s, jump-reset at 2 kW) + feed-in-limit hysteresis + pv-delay cooldown to prevent rapid phase oscillation |
 | **173 automated tests** | Control engine, forecast simulator and optimiser fully covered |
 
 ---
@@ -440,6 +441,7 @@ Alternatively via *Settings → Entities*: filter by "E3DC Maestro" + tick "Show
 | `switch.e3dc_maestro_schonladung_reduzierte_ladeleistung` | Gentle charging | Reduced charge power for battery health |
 | `switch.e3dc_maestro_auto_optimierung` | Auto-optimisation | Grid-search optimiser on/off |
 | `switch.e3dc_maestro_hard_soc_limit_akku_deckel` | Hard SoC limit | Fixed charge ceiling on/off |
+| `switch.e3dc_maestro_vorausschauende_ladung` | Forward-looking charging | Raises today's charge target if tomorrow's PV is expected to be low |
 
 ---
 
@@ -642,13 +644,21 @@ Only active if either `curtailment_guard` or `feed_in_limit` was triggered. Chec
 1. Enable `switch.e3dc_maestro_debug_logging`
 2. Manually enable `sensor.e3dc_maestro_debug_log` (disabled by default)
 
-To get detailed `[decide]` log lines, also add this to `configuration.yaml` and restart HA:
+To get detailed `[decide]` log lines (one per control tick, including EWMA-smoothed PV/load values, current phase and reason), also add this to `configuration.yaml` and restart HA:
 
 ```yaml
 logger:
   logs:
     custom_components.e3dc_maestro: debug
 ```
+
+The lines look like:
+
+```
+[decide] phase=corridor pv=4520W(ewma) house=890W(ewma) grid=-2510W bat=1120W soc=62% reason=Ladekorridor: SoC 62% → Ziel 75%, Leistung 1120W
+```
+
+Very useful for diagnosing why a particular phase was active at any given moment.
 
 ### Auto-optimisation stays on "data fallback"
 
