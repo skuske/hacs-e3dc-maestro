@@ -6,6 +6,7 @@ A Home Assistant custom integration for **intelligent, fully automated charge an
 
 E3DC Maestro runs entirely **local and without any cloud connection**. It extends the `e3dc_rscp` integration with a rule-based control engine featuring 17 prioritised phases, forward-looking charging, curtailment guard, PV forecast, tariff-aware spreading, wallbox and heat-pump control, and an auto-optimisation mode.
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge)](LICENSE)
 [![Donate via PayPal](https://img.shields.io/badge/Donate-PayPal-blue?style=for-the-badge&logo=paypal)](https://www.paypal.com/paypalme/tommigraf)
 
 ---
@@ -707,7 +708,21 @@ Also a heartfelt thank you to **Torben Nehmer** for the [e3dc_rscp](https://gith
 
 ## License
 
-MIT License – see [LICENSE](LICENSE)
+**GNU Affero General Public License v3.0 (AGPL-3.0)** – see [LICENSE](LICENSE)
+
+E3DC Maestro is **free software**: you may use, study, share and modify it under the terms of the AGPL-3.0.
+
+What this means in practice:
+
+- ✅ Private and commercial **use** is permitted.
+- ✅ You may **modify** the code and redistribute your version.
+- ⚠️ Any **modified version that you distribute** (e.g. as another HACS integration, fork, app, firmware, …) **must also be released under AGPL-3.0** and its **complete source code must be made available**.
+- ⚠️ If you run a **modified version as a network/cloud service** (e.g. a SaaS energy optimiser that users interact with over a network), you **must offer the complete source code of that modified version** to those users.
+- ⚠️ The original copyright notice and license must be preserved.
+
+The AGPL was chosen explicitly to keep the control engine, optimiser and forecast logic in `custom_components/e3dc_maestro/` **open and community-owned**. Closed-source forks or proprietary cloud rebrands are **not permitted**.
+
+For questions about commercial licensing or use cases that are not compatible with the AGPL, please contact the author via the issue tracker.
 
 
 ---

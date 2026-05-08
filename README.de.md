@@ -6,6 +6,7 @@ Eine Home Assistant Custom Integration für die **intelligente, vollautomatische
 
 E3DC Maestro läuft vollständig **lokal und ohne Cloud-Verbindung**. Es ergänzt die `e3dc_rscp`-Integration um eine regelbasierte Steuerung mit 17 priorisierten Phasen, vorausschauendem Laden, Abregelschutz, PV-Prognose, Tarifspreizung, Wallbox- und Wärmepumpenregelung sowie einem Auto-Optimierungsmodus.
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge)](LICENSE)
 [![Donate via PayPal](https://img.shields.io/badge/Donate-PayPal-blue?style=for-the-badge&logo=paypal)](https://www.paypal.com/paypalme/tommigraf)
 
 ---
@@ -756,5 +757,18 @@ Ebenfalls ein herzlicher Dank an **Torben Nehmer** für die [e3dc_rscp](https://
 
 ## Lizenz
 
+**GNU Affero General Public License v3.0 (AGPL-3.0)** – siehe [LICENSE](LICENSE)
 
-MIT License – siehe [LICENSE](LICENSE)
+E3DC Maestro ist **freie Software**: Du darfst sie unter den Bedingungen der AGPL-3.0 nutzen, studieren, weitergeben und verändern.
+
+Was das in der Praxis bedeutet:
+
+- ✅ Private und kommerzielle **Nutzung** ist erlaubt.
+- ✅ Du darfst den Code **verändern** und deine Version weitergeben.
+- ⚠️ Eine **veränderte Version, die du weitergibst** (z. B. als andere HACS-Integration, Fork, App, Firmware, …), **muss ebenfalls unter AGPL-3.0** stehen und ihr **vollständiger Quellcode muss verfügbar gemacht werden**.
+- ⚠️ Wenn du eine **veränderte Version als Netzwerk-/Cloud-Service** betreibst (z. B. einen SaaS-Energie-Optimierer, mit dem Nutzer über ein Netzwerk interagieren), **musst du den vollständigen Quellcode dieser veränderten Version** diesen Nutzern zugänglich machen.
+- ⚠️ Der ursprüngliche Copyright-Hinweis und die Lizenz müssen erhalten bleiben.
+
+Die AGPL wurde bewusst gewählt, um die Control-Engine, den Optimizer und die Forecast-Logik in `custom_components/e3dc_maestro/` **offen und gemeinschaftlich** zu halten. Closed-Source-Forks oder proprietäre Cloud-Rebrands sind **nicht erlaubt**.
+
+Für Fragen zu kommerzieller Lizenzierung oder Anwendungsfällen, die mit der AGPL nicht kompatibel sind, bitte den Autor über den Issue-Tracker kontaktieren.
