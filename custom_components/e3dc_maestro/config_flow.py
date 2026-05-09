@@ -22,6 +22,11 @@ from .const import (
     CONF_CHEAP_THRESHOLD,
     CONF_DYNAMIC_TARIFF_ENABLED,
     CONF_FEED_IN_LIMIT_PERCENT,
+    CONF_FIXED_BUY_PRICE,
+    CONF_FEED_IN_PRICE,
+    CONF_BATTERY_CAPEX_EUR,
+    CONF_BATTERY_TOTAL_CYCLES,
+    CONF_TARIFF_MODE,
     CONF_GRID_POWER_SENSOR,
     CONF_HP_ENABLED,
     CONF_HP_MAX_PRICE,
@@ -52,6 +57,7 @@ from .const import (
     CONF_PV_FORECAST_ENABLED,
     CONF_PV_FORECAST_SAFETY_FACTOR,
     CONF_PV_FORECAST_SENSOR,
+    CONF_PV_FORECAST_SENSOR_DAY2,
     CONF_PV_FORECAST_THRESHOLD_KWH,
     CONF_DELAY_MIN_SOC,
     CONF_PV_POWER_SENSOR,
@@ -88,6 +94,12 @@ from .const import (
     DEFAULT_MAX_CHARGE_POWER,
     DEFAULT_MAX_GRID_CHARGE_KWH,
     DEFAULT_BATTERY_CAPACITY_KWH,
+    DEFAULT_TARIFF_MODE,
+    DEFAULT_FIXED_BUY_PRICE,
+    DEFAULT_FEED_IN_PRICE,
+    DEFAULT_BATTERY_CAPEX_EUR,
+    DEFAULT_BATTERY_TOTAL_CYCLES,
+    TARIFF_MODES,
     DEFAULT_MIN_CHARGE_POWER,
     DEFAULT_PV_FORECAST_SAFETY_FACTOR,
     DEFAULT_PV_FORECAST_THRESHOLD_KWH,
@@ -243,6 +255,17 @@ STEP_HT_SCHEMA = vol.Schema(
 
 STEP_TARIFF_SCHEMA = vol.Schema(
     {
+        vol.Required(CONF_TARIFF_MODE, default=DEFAULT_TARIFF_MODE): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=TARIFF_MODES,
+                mode=selector.SelectSelectorMode.DROPDOWN,
+                translation_key="tariff_mode",
+            )
+        ),
+        vol.Optional(CONF_FIXED_BUY_PRICE, default=DEFAULT_FIXED_BUY_PRICE): _number_selector(0.0, 1.0, 0.001, "€/kWh"),
+        vol.Optional(CONF_FEED_IN_PRICE, default=DEFAULT_FEED_IN_PRICE): _number_selector(0.0, 1.0, 0.001, "€/kWh"),
+        vol.Optional(CONF_BATTERY_CAPEX_EUR, default=DEFAULT_BATTERY_CAPEX_EUR): _number_selector(0, 50000, 100, "€"),
+        vol.Optional(CONF_BATTERY_TOTAL_CYCLES, default=DEFAULT_BATTERY_TOTAL_CYCLES): _number_selector(500, 20000, 100, "Zyklen"),
         vol.Required(CONF_DYNAMIC_TARIFF_ENABLED, default=False): selector.BooleanSelector(),
         vol.Optional(CONF_PRICE_SENSOR): _entity_selector(),
         vol.Optional(CONF_CHEAP_THRESHOLD, default=DEFAULT_CHEAP_THRESHOLD): _number_selector(0.0, 1.0, 0.01, "€/kWh"),
@@ -310,7 +333,11 @@ STEP_FAILSAFE_SCHEMA = vol.Schema(
 STEP_PV_FORECAST_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_PV_FORECAST_ENABLED, default=False): selector.BooleanSelector(),
+        # PV-Forecast-Sensoren (heute → morgen → übermorgen)
         vol.Optional(CONF_PV_FORECAST_SENSOR): _entity_selector(),
+        vol.Optional(CONF_TOMORROW_PV_SENSOR): _entity_selector(),
+        vol.Optional(CONF_PV_FORECAST_SENSOR_DAY2): _entity_selector(),
+        # Schwellwerte / Akku-Parameter
         vol.Optional(
             CONF_PV_FORECAST_THRESHOLD_KWH, default=DEFAULT_PV_FORECAST_THRESHOLD_KWH
         ): _number_selector(0, 100, 0.5, "kWh"),
@@ -323,15 +350,15 @@ STEP_PV_FORECAST_SCHEMA = vol.Schema(
         vol.Optional(
             CONF_DELAY_MIN_SOC, default=DEFAULT_DELAY_MIN_SOC
         ): _number_selector(0, 80, 5, "%"),
+        # Spreading
         vol.Optional(CONF_SPREADING_ENABLED, default=False): selector.BooleanSelector(),
         vol.Optional(
             CONF_SPREADING_TARGET_SOC, default=DEFAULT_SPREADING_TARGET_SOC
         ): _number_selector(50, 100, 1, "%"),
-        # F1+: Forward-Looking (vorausschauende Ladung)
+        # F1+: Forward-Looking (vorausschauende Ladung — nutzt den Morgen-Sensor oben)
         vol.Optional(
             CONF_FORWARD_LOOKING_ENABLED, default=DEFAULT_FORWARD_LOOKING_ENABLED
         ): selector.BooleanSelector(),
-        vol.Optional(CONF_TOMORROW_PV_SENSOR): _entity_selector(),
         vol.Optional(
             CONF_FORWARD_LOOKING_MAX_SOC, default=DEFAULT_FORWARD_LOOKING_MAX_SOC
         ): _number_selector(60, 100, 1, "%"),

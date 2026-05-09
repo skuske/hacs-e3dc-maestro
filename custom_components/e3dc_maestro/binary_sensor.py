@@ -20,6 +20,8 @@ from .const import (
     PHASE_EMERGENCY,
     PHASE_FEED_IN_LIMIT,
     PHASE_HT_PROTECTION,
+    TARIFF_MODE_FIXED,
+    UNJUSTIFIED_GRID_CHARGE_THRESHOLD_KWH,
 )
 from .coordinator import E3DCMaestroCoordinator
 from .sensor import _device_info
@@ -79,6 +81,18 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[MaestroBinarySensorDescription, ...] = (
             coord.last_decision
             and coord.last_decision.discharge_power_limit is not None
             and coord.last_decision.discharge_power_limit <= 0
+        ),
+    ),
+    # v0.2.0: Sanity-Check – Netzladung trotz festem Tarif
+    MaestroBinarySensorDescription(
+        key="unjustified_grid_charge",
+        name="Netzladung ohne Rechtfertigung",
+        icon="mdi:alert-circle-outline",
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        value_fn=lambda coord: bool(
+            getattr(coord._params, "tariff_mode", "fixed") == TARIFF_MODE_FIXED
+            and coord.stats.get("grid_to_battery_today_kwh", 0)
+            > UNJUSTIFIED_GRID_CHARGE_THRESHOLD_KWH
         ),
     ),
 )

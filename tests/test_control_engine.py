@@ -2189,3 +2189,77 @@ class TestForwardLooking:
         p = _fwd_params(forward_looking_max_soc=70.0)
         s = _fwd_state(tomorrow_pv=20.0, tomorrow_cons=5.0)
         assert forward_looking_charge_target(s, p, 80.0) == 80.0
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# v0.2.0: tariff_mode hard-constraint
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class TestTariffModeConstraint:
+    """`tariff_mode == "fixed"` must veto the TARIFF_LOW grid-charging bypass."""
+
+    def _state(self, pv=500, house=2000):
+        return MaestroState(
+            soc=50.0, pv_power=pv, house_power=house,
+            grid_power=0, battery_power=0,
+        )
+
+    def test_dynamic_mode_allows_grid_in_tariff_low(self):
+        """Backward compat: dynamic tariff mode keeps the existing TARIFF_LOW bypass."""
+        from custom_components.e3dc_maestro.control_engine import (
+            _apply_house_ceiling, TARIFF_LOW,
+        )
+        p = MaestroParams(tariff_mode="dynamic")
+        # PV (500W) < house (2000W) → no surplus → would be capped to 0.
+        # tariff_low + dynamic mode → cap bypassed, full charge_power preserved.
+        out = _apply_house_ceiling(
+            charge_power=3000, state=self._state(), params=p,
+            phase="corridor", current_price=0.05, tariff_class=TARIFF_LOW,
+        )
+        assert out == 3000
+
+    def test_fixed_mode_blocks_grid_in_tariff_low(self):
+        """Hard constraint: fixed tariff mode caps to PV surplus regardless of tariff_low."""
+        from custom_components.e3dc_maestro.control_engine import (
+            _apply_house_ceiling, TARIFF_LOW,
+        )
+        p = MaestroParams(tariff_mode="fixed")
+        # No PV surplus → capped to 0 even with tariff_low active.
+        out = _apply_house_ceiling(
+            charge_power=3000, state=self._state(pv=500, house=2000), params=p,
+            phase="corridor", current_price=0.05, tariff_class=TARIFF_LOW,
+        )
+        assert out == 0
+
+    def test_fixed_mode_allows_pv_surplus(self):
+        """Fixed tariff mode still allows charging from PV surplus."""
+        from custom_components.e3dc_maestro.control_engine import (
+            _apply_house_ceiling, TARIFF_LOW,
+        )
+        p = MaestroParams(tariff_mode="fixed")
+        # PV 5000W - house 1500W = 3500W surplus → charge_power capped to 3000W (full).
+        out = _apply_house_ceiling(
+            charge_power=3000, state=self._state(pv=5000, house=1500), params=p,
+            phase="corridor", current_price=0.05, tariff_class=TARIFF_LOW,
+        )
+        assert out == 3000
+
+    def test_emergency_phase_bypasses_fixed_mode(self):
+        """Safety-critical phases (emergency/feed_in_limit/curtailment) always allow grid."""
+        from custom_components.e3dc_maestro.control_engine import _apply_house_ceiling
+        from custom_components.e3dc_maestro.const import (
+            PHASE_EMERGENCY, PHASE_FEED_IN_LIMIT, PHASE_CURTAILMENT_GUARD,
+        )
+        p = MaestroParams(tariff_mode="fixed")
+        for phase in (PHASE_EMERGENCY, PHASE_FEED_IN_LIMIT, PHASE_CURTAILMENT_GUARD):
+            out = _apply_house_ceiling(
+                charge_power=3000, state=self._state(), params=p,
+                phase=phase, current_price=None, tariff_class=None,
+            )
+            assert out == 3000, f"{phase} should bypass house ceiling even when fixed"
+
+    def test_default_tariff_mode_is_fixed(self):
+        """Default value protects naive users from accidental grid charging."""
+        p = MaestroParams()
+        assert p.tariff_mode == "fixed"

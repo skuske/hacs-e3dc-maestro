@@ -63,22 +63,31 @@
       },
       "pv_forecast": {
         "title": "PV-Prognose / Ladeverzögerung",
-        "description": "Verzögert die Ladung aus dem Korridor, wenn die heutige PV-Restprognose ausreicht um den Speicher zu füllen.",
+        "description": "Forecast-Sensoren für heute, morgen und übermorgen. Forward-Looking nutzt den Morgen-Sensor, um den Akku vorausschauend für schlechte PV-Tage zu laden. Der Auto-Optimizer nutzt heute + übermorgen für einen 48 h-Horizont.",
         "data": {
           "pv_forecast_enabled": "PV-Prognose-Verzögerung aktivieren",
-          "pv_forecast_sensor": "Prognose-Sensor (verbleibende kWh heute)",
+          "pv_forecast_sensor": "Prognose heute – verbleibende kWh (z. B. Solcast: Prognose verbleibende Leistung heute)",
+          "tomorrow_pv_sensor": "Prognose morgen – Tagessumme kWh (z. B. Solcast: Prognose morgen) – wird für Forward-Looking genutzt",
+          "pv_forecast_sensor_day2": "Prognose übermorgen – optional (z. B. Solcast: Prognose Tag 3) – aktiviert 48 h-Horizont im Auto-Optimizer",
           "pv_forecast_threshold_kwh": "Mindest-Prognose (kWh)",
           "battery_capacity_kwh": "Nutzbare Batteriekapazität (kWh)",
           "pv_forecast_safety_factor": "Sicherheitsfaktor (Prognose ≥ Bedarf × Faktor)",
           "delay_min_soc": "Mindest-SoC vor Verzögerung (%)",
           "spreading_enabled": "Ladeverteilung aktivieren",
-          "spreading_target_soc": "Ziel-SoC für Ladeverteilung (%)"
+          "spreading_target_soc": "Ziel-SoC für Ladeverteilung (%)",
+          "forward_looking_enabled": "Forward-Looking aktivieren (lädt vorausschauend, wenn morgen wenig PV erwartet wird)",
+          "forward_looking_max_soc": "Max. SoC für Forward-Looking-Vorladung (%)"
         }
       },
       "tariff": {
-        "title": "Dynamische Tarife",
-        "description": "Laden aus dem Netz bei günstigem Börsenstrom.",
+        "title": "Tarif & Kosten",
+        "description": "Stromtarif-Modus und €/kWh-Preise. Bei festem Tarif sperrt Maestro Strategien, die Strom aus dem Netz in den Akku einspeisen würden (überflüssige Zyklen vermeiden).",
         "data": {
+          "tariff_mode": "Tarif-Modus",
+          "fixed_buy_price": "Strompreis Bezug (€/kWh, fester Tarif)",
+          "feed_in_price": "Einspeisevergütung (€/kWh)",
+          "battery_capex_eur": "Akku-Anschaffungskosten (€, für Wear-Cost)",
+          "battery_total_cycles": "Akku-Lebensdauer (Vollzyklen lt. Hersteller)",
           "dynamic_tariff_enabled": "Dynamische Tarife aktivieren",
           "price_sensor": "Preis-Sensor (€/kWh)",
           "cheap_threshold": "Günstig-Schwelle (€/kWh)",
@@ -175,7 +184,24 @@
       "sources": { "title": "Quell-Entities" },
       "system": { "title": "Systemparameter" },
       "season": { "title": "Saison & Ladekorridor" },
-      "pv_forecast": { "title": "PV-Prognose / Ladeverzögerung" },
+      "pv_forecast": {
+        "title": "PV-Prognose / Ladeverzögerung",
+        "description": "Forecast-Sensoren für heute, morgen und übermorgen. Forward-Looking nutzt den Morgen-Sensor, um den Akku vorausschauend für schlechte PV-Tage zu laden. Der Auto-Optimizer nutzt heute + übermorgen für einen 48 h-Horizont.",
+        "data": {
+          "pv_forecast_enabled": "PV-Prognose-Verzögerung aktivieren",
+          "pv_forecast_sensor": "Prognose heute – verbleibende kWh (z. B. Solcast: Prognose verbleibende Leistung heute)",
+          "tomorrow_pv_sensor": "Prognose morgen – Tagessumme kWh (z. B. Solcast: Prognose morgen) – wird für Forward-Looking genutzt",
+          "pv_forecast_sensor_day2": "Prognose übermorgen – optional (z. B. Solcast: Prognose Tag 3) – aktiviert 48 h-Horizont im Auto-Optimizer",
+          "pv_forecast_threshold_kwh": "Mindest-Prognose (kWh)",
+          "battery_capacity_kwh": "Nutzbare Batteriekapazität (kWh)",
+          "pv_forecast_safety_factor": "Sicherheitsfaktor (Prognose ≥ Bedarf × Faktor)",
+          "delay_min_soc": "Mindest-SoC vor Verzögerung (%)",
+          "spreading_enabled": "Ladeverteilung aktivieren",
+          "spreading_target_soc": "Ziel-SoC für Ladeverteilung (%)",
+          "forward_looking_enabled": "Forward-Looking aktivieren (lädt vorausschauend, wenn morgen wenig PV erwartet wird)",
+          "forward_looking_max_soc": "Max. SoC für Forward-Looking-Vorladung (%)"
+        }
+      },
       "ht": { "title": "HT/NT-Schutz" },
       "tariff_slots": {
         "title": "Tarif-Slots",
@@ -184,7 +210,7 @@
       "tariff_slot_edit": {
         "title": "Tarif-Slot bearbeiten"
       },
-      "tariff": { "title": "Dynamische Tarife" },
+      "tariff": { "title": "Tarif & Kosten" },
       "wallbox": { "title": "Wallbox" },
       "evcc": {
         "title": "EVCC-Integration",

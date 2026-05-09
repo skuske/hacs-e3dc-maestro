@@ -83,6 +83,31 @@ views:
           - entity: sensor.e3dc_maestro_einspeise_eingriffe_heute
             name: Einspeise-Eingriffe heute
 
+      # ── 💶 Erträge & Kosten heute ─────────────────────
+      - type: entities
+        title: 💶 Erträge & Kosten heute
+        entities:
+          - entity: sensor.e3dc_maestro_pv_eigenverbrauch_heute
+            name: PV-Eigenverbrauch
+          - entity: sensor.e3dc_maestro_pv_ersparnis_heute
+            name: PV-Ersparnis (vermiedener Bezug)
+          - entity: sensor.e3dc_maestro_einspeise_erlos_heute
+            name: Einspeise-Erlös
+          - type: divider
+          - entity: sensor.e3dc_maestro_stromkosten_heute
+            name: Netzbezugskosten
+          - entity: sensor.e3dc_maestro_netto_stromkosten_heute
+            name: Netto-Stromkosten (Kosten − Erlös)
+          - entity: sensor.e3dc_maestro_energiebilanz_heute
+            name: ✅ Energiebilanz (Erlös + Ersparnis − Kosten − Verschleiß)
+          - type: divider
+          - entity: sensor.e3dc_maestro_netzbezug_heute
+            name: Netzbezug (kWh)
+          - entity: sensor.e3dc_maestro_netzeinspeisung_heute
+            name: Netzeinspeisung (kWh)
+          - entity: binary_sensor.e3dc_maestro_netzladung_ohne_rechtfertigung
+            name: ⚠️ Netzladung ohne Rechtfertigung
+
       # ── PV-Prognose / Ladeverzögerung ─────────────────
       - type: conditional
         conditions:

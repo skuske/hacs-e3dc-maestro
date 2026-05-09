@@ -284,6 +284,14 @@ class MaestroParams:
     # F3: Auto-Optimierungs-Modus
     auto_mode_enabled: bool = False
     auto_mode_objective: str = "self_consumption"  # self_consumption | cost | co2
+    # v0.2.0: Tariff mode + cost tracking
+    # "fixed"   → Netzladung außer Notfall/Feed-in-Schutz/Curtailment kategorisch verboten
+    # "dynamic" → Netzladung bei TARIFF_LOW erlaubt (bisheriges Verhalten)
+    tariff_mode: str = "fixed"
+    fixed_buy_price: float = 0.30   # €/kWh Bezug (fester Tarif)
+    feed_in_price: float = 0.08     # €/kWh Einspeisevergütung
+    battery_capex_eur: float = 8000.0      # € Anschaffung (für Wear-Cost im Optimizer)
+    battery_total_cycles: float = 5000.0   # Vollzyklen Lebensdauer
     # Manuelle Erzwingung der Akku-Entladung (Dashboard-Schalter)
     force_discharge_power_w: float = 3000.0
 
@@ -627,13 +635,18 @@ def _apply_house_ceiling(
 
     Bypassed for phases that intentionally use grid power:
     - EMERGENCY, FEED_IN_LIMIT, CURTAILMENT_GUARD
-    - active tariff class is "low" (cheap dynamic tariff)
+    - active tariff class is "low" (cheap dynamic tariff) AND tariff_mode == "dynamic"
+
+    v0.2.0: Wenn ``params.tariff_mode == "fixed"`` (fester Strompreis) wird der
+    TARIFF_LOW-Bypass kategorisch ignoriert → Netzladung ist außer in den drei
+    Bypass-Phasen verboten.
     """
     from .const import PHASE_CURTAILMENT_GUARD, PHASE_EMERGENCY, PHASE_FEED_IN_LIMIT
     bypass_phases = {PHASE_EMERGENCY, PHASE_FEED_IN_LIMIT, PHASE_CURTAILMENT_GUARD}
     if phase in bypass_phases:
         return charge_power
-    if tariff_class == TARIFF_LOW:
+    tariff_mode = getattr(params, "tariff_mode", "fixed")
+    if tariff_class == TARIFF_LOW and tariff_mode == "dynamic":
         return charge_power
     surplus = max(0.0, state.pv_power - state.house_power)
     return min(charge_power, surplus) if surplus > 0 else 0.0

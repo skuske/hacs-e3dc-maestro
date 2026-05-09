@@ -306,6 +306,39 @@ views:
           - entity: sensor.e3dc_maestro_einspeiselimit_gesichert_heute
             name: Einspeiselimit gesichert (kWh)
 
+      # ── 💶 Erträge & Kosten heute ─────────────────────
+      - type: entities
+        title: 💶 Erträge & Kosten heute
+        entities:
+          - entity: sensor.e3dc_maestro_pv_eigenverbrauch_heute
+            name: PV-Eigenverbrauch
+          - entity: sensor.e3dc_maestro_pv_ersparnis_heute
+            name: PV-Ersparnis (vermiedener Bezug)
+          - entity: sensor.e3dc_maestro_einspeise_erlos_heute
+            name: Einspeise-Erlös
+          - type: divider
+          - entity: sensor.e3dc_maestro_stromkosten_heute
+            name: Netzbezugskosten
+          - entity: sensor.e3dc_maestro_netto_stromkosten_heute
+            name: Netto-Stromkosten (Kosten − Erlös)
+          - entity: sensor.e3dc_maestro_energiebilanz_heute
+            name: ✅ Energiebilanz (Erlös + Ersparnis − Kosten − Verschleiß)
+          - type: divider
+          - entity: sensor.e3dc_maestro_netzbezug_heute
+            name: Netzbezug (kWh)
+          - entity: sensor.e3dc_maestro_netzeinspeisung_heute
+            name: Netzeinspeisung (kWh)
+          - entity: binary_sensor.e3dc_maestro_netzladung_ohne_rechtfertigung
+            name: ⚠️ Netzladung ohne Rechtfertigung
+          - type: divider
+          - type: button
+            name: Wie wird das berechnet?
+            icon: mdi:help-circle-outline
+            action_name: Hilfe öffnen
+            tap_action:
+              action: navigate
+              navigation_path: /e3dc-maestro/help-kostenmodul
+
       - type: custom:mushroom-title-card
         title: 24h SoC-Prognose
         subtitle: "Benötigt aktivierten Forecast-Sensor (min. 7 Tage Verbrauchsdaten)"
@@ -1422,6 +1455,7 @@ views:
           | Hardware-Parameter | [→ Hardware](/e3dc-maestro/help-hardware) |
           | Steuerverhalten | [→ Steuerverhalten](/e3dc-maestro/help-steuerverhalten) |
           | Auto-Optimierung | [→ Auto](/e3dc-maestro/help-auto) |
+          | Kostenmodul (€-Sensoren, Bilanz) | [→ Kostenmodul](/e3dc-maestro/help-kostenmodul) |
 
       - type: markdown
         content: |
@@ -1618,6 +1652,182 @@ views:
           {% if states('sensor.e3dc_maestro_auto_aktive_strategie') == 'auto' %}green
           {% elif 'Fallback' in states('sensor.e3dc_maestro_auto_aktive_strategie') %}orange
           {% else %}grey{% endif %}
+
+      # ── 🔍 Was hat die Auto-Optimierung optimiert? ─────────────
+      - type: markdown
+        title: 🔍 Was wurde optimiert?
+        content: >
+          {% set s = 'sensor.e3dc_maestro_auto_aktive_strategie' %}
+          {% set r = state_attr(s, 'overrides') %}
+          {% set fb = state_attr(s, 'fallback') %}
+          {% set fr = state_attr(s, 'fallback_reason') %}
+          {% set last = state_attr(s, 'last_run') %}
+          {% set grid = state_attr(s, 'grid_size') %}
+          {% set obj = state_attr(s, 'objective') %}
+          {% set ts = last | as_timestamp | timestamp_custom('%d.%m. %H:%M') if last else '—' %}
+          {% if fb %}
+          **⚠️ Fallback aktiv** — manueller Modus.
+          {% if fr %}_Grund:_ `{{ fr }}`{% endif %}
+          {% elif not last %}
+          _Noch keine Auto-Optimierung gelaufen_ (läuft kurz nach Mitternacht, benötigt ≥ 7 Tage Historie).
+          {% elif not r %}
+          ✅ **Baseline ist bereits optimal** — keine Override nötig.
+
+          Der Optimizer hat **{{ grid }} Kombinationen** für Ziel `{{ obj }}` durchgerechnet (letzter Lauf: {{ ts }}), keine bringt eine Verbesserung. Typisch wenn der 24h-Forecast bereits 100 % Autarkie und 0 kWh Netzbezug zeigt (z. B. sonniger PV-Tag).
+
+          Maestro nutzt deine **manuellen Einstellungen** unverändert weiter.
+          {% else %}
+          **Ziel:** `{{ obj }}`  ·  **{{ grid }} Kombinationen** ausgewertet  ·  **Horizont {{ state_attr(s,'horizon_h') or 24 }} h**  ·  letzter Lauf: {{ ts }}
+
+
+          ### Geänderte Parameter (Override)
+
+          | Parameter | Override | Standard-Empfehlung |
+          |---|---|---|
+          | Morning-Cap aktiv | `{{ r.morning_cap_enabled }}` | on |
+          | Morning-Cap SoC | **{{ r.morning_cap_soc }} %** | 40 % |
+          | Morning-Cap bis (lokal) | **{{ r.morning_cap_until_h }} h** | 10 h |
+          | Schonladung aktiv | `{{ r.gentle_charge_enabled }}` | on |
+          | Schonlade-Faktor | **{{ r.gentle_charge_factor }}** | 0.35 |
+          {% endif %}
+
+      - type: entities
+        title: 📊 Live-Vergleich Override vs. Basis (24 h-Forecast)
+        state_color: false
+        entities:
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: estimated_savings_eur
+            name: 💶 Geschätzte Einsparung
+            suffix: " €/Tag"
+            icon: mdi:piggy-bank
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: estimated_savings_pct
+            name: Score-Verbesserung
+            suffix: " %"
+            icon: mdi:trending-up
+          - type: divider
+          - type: section
+            label: Energie-Deltas (Override − Basis)
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: delta_grid_draw_kwh
+            name: Δ Netzbezug
+            suffix: " kWh"
+            icon: mdi:transmission-tower-import
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: delta_grid_feed_in_kwh
+            name: Δ Netzeinspeisung
+            suffix: " kWh"
+            icon: mdi:transmission-tower-export
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: delta_curtailed_kwh
+            name: Δ PV-Curtailment
+            suffix: " kWh"
+            icon: mdi:solar-power-variant
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: delta_self_sufficiency
+            name: Δ Autarkie
+            icon: mdi:home-battery
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: delta_min_soc
+            name: Δ minimaler SoC
+            suffix: " %"
+            icon: mdi:battery-low
+          - type: divider
+          - type: section
+            label: 💶 Aufschlüsselung der Einsparung
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: savings_from_less_grid_draw_eur
+            name: Weniger Netzbezug × Kaufpreis
+            suffix: " €"
+            icon: mdi:cash-minus
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: savings_from_more_feed_in_eur
+            name: Mehr Einspeisung × Vergütung
+            suffix: " €"
+            icon: mdi:cash-plus
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: tariff_buy_price_eur_kwh
+            name: Verwendeter Kaufpreis
+            suffix: " €/kWh"
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: tariff_feed_in_price_eur_kwh
+            name: Verwendeter Einspeisepreis
+            suffix: " €/kWh"
+
+      - type: markdown
+        content: |
+          ### 📈 Forecast-Werte im Detail
+          {% set s = 'sensor.e3dc_maestro_auto_aktive_strategie' %}
+          {% set h = state_attr(s, 'horizon_h') or 24 %}
+          **Horizont: {{ h }} h** {% if h == 48 %}_(Tag 1 + Tag 2 — der konfigurierte Forecast-Sensor liefert Daten für beide Tage)_{% else %}_(nur Tag 1 — kein Tag-2-Forecast verfügbar)_{% endif %}
+
+          Alle „Horizont"-Werte unten sind **Summen über die {{ h }} h** ab Optimizer-Lauf.
+      - type: entities
+        entities:
+          - type: section
+            label: Override-Strategie (best)
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: sim_grid_draw_kwh
+            name: Netzbezug (Horizont)
+            suffix: " kWh"
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: sim_grid_feed_in_kwh
+            name: Einspeisung (Horizont)
+            suffix: " kWh"
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: sim_curtailed_kwh
+            name: PV-Curtailment (Horizont)
+            suffix: " kWh"
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: sim_self_sufficiency
+            name: Autarkiegrad
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: sim_min_soc
+            name: Min. SoC
+            suffix: " %"
+          - type: divider
+          - type: section
+            label: Basis-Strategie (ohne Auto)
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: baseline_grid_draw_kwh
+            name: Netzbezug (Horizont)
+            suffix: " kWh"
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: baseline_grid_feed_in_kwh
+            name: Einspeisung (Horizont)
+            suffix: " kWh"
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: baseline_curtailed_kwh
+            name: PV-Curtailment (Horizont)
+            suffix: " kWh"
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: baseline_self_sufficiency
+            name: Autarkiegrad
+          - type: attribute
+            entity: sensor.e3dc_maestro_auto_aktive_strategie
+            attribute: baseline_min_soc
+            name: Min. SoC
+            suffix: " %"
 
   - title: "Hilfe: Ladekorridor"
     path: help-ladekorridor
@@ -2612,61 +2822,231 @@ views:
       - type: markdown
         content: |
           ## Auto-Optimierung
-          
-          Maestro evaluiert einmal täglich (kurz nach Mitternacht) eine Reihe von
-          Morning-Cap-Parameter-Kombinationen mit dem Forecast-Simulator als Bewertungsfunktion
-          und wählt diejenige Konfiguration, die das gewählte Ziel maximiert.
-          
-          Manuelle Eingaben (Switches/Number-Entities) **überschreiben das
+
+          Maestro evaluiert einmal täglich (kurz nach Mitternacht) automatisch
+          mehrere hundert Parameter-Kombinationen für **Morning-Cap** und
+          **Schonladung** mit dem internen 24-h-Forecast-Simulator als
+          Bewertungsfunktion und wählt die Kombination, die das gewählte Ziel
+          maximiert.
+
+          Manuelle Eingaben (Switches / Number-Entities) **überschreiben das
           Auto-Override sofort** – der Nutzer gewinnt immer.
-          
+
           ---
-          
+
+          ### Wie wird bewertet?
+
+          Der Simulator rechnet in **15-Minuten-Schritten** das Verhalten der
+          nächsten 24 h durch — und **48 h, wenn ein Solcast/Forecast.Solar-Sensor
+          auch die Tag-2-Prognose liefert**:
+
+          1. **PV-Prognose** aus `forecast.solar`-Sensor oder Astro-Modus.
+             Bei 48 h-Horizont wird Tag 1 + Tag 2 stundenweise gerechnet.
+          2. **Hauslast-Prognose** aus den letzten 7 Tagen (kWh/Tag-Mittel).
+          3. **Akku-Simulation** mit den aktuellen Hardware-Parametern
+             (Kapazität, Wirkungsgrad, Lade-/Entladegrenzen).
+          4. **Strategie** mit den getesteten Parametern (Morning-Cap-SoC,
+             -bis-Uhrzeit, Schonladung-Faktor).
+
+          Ergebnis je Kombination: prognostizierter Netzbezug, Einspeisung,
+          Eigenverbrauch, Curtailment-Verlust und – beim Ziel `cost` – die
+          €-Bilanz unter Berücksichtigung deiner Tarifeinstellungen.
+
+          **Warum 48 h-Horizont?** Bei reinem 24-h-Blick wirkt ein niedriger
+          End-SoC abends „kostenlos" (mehr Einspeisung). Mit Tag-2-Forecast
+          erkennt der Optimizer, ob das am Folgetag teuren Netzbezug
+          verursacht (bewölkter Morgen) — und wählt dann automatisch eine
+          schonendere Strategie.
+
+          **Wie aktivieren?** In den Maestro-Optionen unter
+          *PV-Prognose* das Feld **„Prognose-Sensor Tag 2"** auf einen
+          Solcast-Sensor mit `detailedHourly`-Attribut für den übernächsten
+          Tag setzen (z. B. `sensor.solcast_pv_forecast_prognose_tag_3`).
+          Erst dann läuft der Optimizer mit 48 h-Horizont — keine
+          Auto-Erkennung, um Überraschungen zu vermeiden.
+
+          ---
+
           ### Optimierungsziele
-          
-          - **`self_consumption`** (Eigenverbrauch maximieren) — Standard.
-            Maximiert den Anteil PV-Energie, der direkt verbraucht oder im Akku
-            zwischengespeichert wird.
-          - **`cost`** (Kosten minimieren) — Bewertet Strombezug zu 0,30 €/kWh
-            vs. Einspeisevergütung 0,08 €/kWh.
-          - **`co2`** (CO₂ minimieren) — Bewertet Netzbezug mit 0,4 kg CO₂/kWh
-            (DE Mix-Durchschnitt).
-          
+
+          - **`self_consumption`** (Eigenverbrauch maximieren) — **Standard.**
+            Score = `Autarkie · 100 − 0,5 · Netzbezug − 1,5 · Curtailment`.
+            Kombiniert Eigenverbrauchsgrad mit Strafe für PV-Abregelung.
+          - **`cost`** (€-Bilanz maximieren).
+            Score = `−(Bezug · Kaufpreis − Einspeisung · Verkaufspreis)
+            − Curtailment · Verkaufspreis − Akku-Verschleiß`.
+            **Preise stammen aus deinen Tarif-Einstellungen** — fixer Tarif
+            oder Mittelwert des dynamischen Preissensors. Akku-Verschleiß
+            wird aus Kapazität, Capex und Total-Cycles berechnet (siehe
+            → Hardware bzw. → Kostenmodul).
+          - **`co2`** (CO₂ minimieren).
+            Score = `−(Netzbezug + Curtailment) · 0,4 kg/kWh`
+            (deutscher Strommix-Durchschnitt).
+
           ---
-          
+
           ### Suchraum (Grid-Search)
-          
-          | Parameter              | Werte                       |
-          |------------------------|-----------------------------|
-          | Morning-Cap SoC        | 20 / 30 / 40 / 50 %         |
-          | Morning-Cap bis (lokal)| 9 / 10 / 11 / 12 h          |
-          | Schonlade-Faktor       | 0.20 / 0.35 / 0.50 / 0.70   |
-          
-          → 64 Kombinationen pro Tag.
-          
+
+          | Parameter              | Werte                                  |
+          |------------------------|----------------------------------------|
+          | Morning-Cap SoC        | 20 / 30 / 40 / 50 / 60 / 70 / 80 %     |
+          | Morning-Cap bis (lokal)| 7 / 8 / 9 / 10 / 11 / 12 h             |
+          | Schonlade-Faktor       | 0.20 / 0.35 / 0.50 / 0.70 / 1.00       |
+
+          → **210 Kombinationen** pro Tag (Attribut `grid_size`).
+
+          Höhere Cap-SoC + spätere Until-Stunde halten den Akku im Sommer
+          länger leer und verhindern Mittags-Curtailment auf hohen PV-Tagen.
+          Schonlade-Faktor 1.0 deaktiviert die Schonladung effektiv.
+
           ---
-          
+
           ### Sicherheitsbedingungen
-          
-          - Auto-Override wird **nicht** angewendet, wenn die simulierte minimale
-            SoC-Trajektorie unter `adaptive_reserve_min_soc` (mindestens 5 %) fallen
-            würde.
-          - Bei < 7 Tagen Verbrauchs- oder PV-Historie greift der Fallback (manueller
-            Modus).
-          
+
+          - Auto-Override wird **nicht** angewendet, wenn die simulierte
+            minimale SoC-Trajektorie unter `adaptive_reserve_min_soc`
+            (mindestens 5 %) fallen würde.
+          - Bei < 7 Tagen Verbrauchs- oder PV-Historie greift der Fallback
+            (= manueller Modus).
+          - Bringt der beste Kandidat keinen messbaren Vorteil gegenüber
+            der Basis-Konfiguration → ebenfalls Fallback.
+          - Override gilt **nur für den heutigen Tag**. Am nächsten
+            Mitternacht läuft die Optimierung erneut.
+
           ---
-          
+
           ### Status-Sensor
-          
+
           `sensor.e3dc_maestro_auto_aktive_strategie` zeigt:
-          
+
           - **`manuell`** — Auto deaktiviert.
           - **`manuell (Fallback)`** — Auto aktiv, aber kein gültiges Override
-            (zu wenig Daten oder kein besserer Score gefunden).
-          - **`auto`** — Override aktiv, Morning-Cap-Parameter werden überschrieben.
-          
-          Attribute des Sensors: `objective`, `last_run`, `fallback_reason`,
-          `overrides`, `grid_size`, `estimated_savings_pct`.
-          
+            (zu wenig Daten / Sicherheit / kein besserer Score).
+          - **`auto`** — Override aktiv, Morning-Cap-Parameter werden
+            überschrieben.
+
+          Attribute des Sensors:
+
+          | Attribut | Bedeutung |
+          |---|---|
+          | `objective` | Aktuell gewähltes Ziel |
+          | `last_run` | Zeitpunkt der letzten Optimierung |
+          | `fallback_reason` | Grund, falls Fallback aktiv |
+          | `overrides` | Welche Parameter überschrieben sind und mit welchen Werten |
+          | `grid_size` | Anzahl ausgewerteter Kombinationen (210) |
+          | `estimated_savings_pct` | Geschätzter Vorteil ggü. Basis (in %) |
+
+          ---
+
+          ### Verknüpfung mit dem Kostenmodul
+
+          Das `cost`-Ziel benutzt **dieselben Tarifeinstellungen** wie die
+          €-Sensoren der Kachel „💶 Erträge & Kosten heute". Wer den
+          Auto-Optimierer auf `cost` stellt, optimiert also direkt auf das,
+          was der Sensor `Energiebilanz heute` über den Tag hochzählt –
+          siehe [→ Kostenmodul](/e3dc-maestro/help-kostenmodul) für die
+          genauen Formeln.
+
+          ---
+
+  - title: "Hilfe: Kostenmodul"
+    path: help-kostenmodul
+    subview: true
+    cards:
+      - type: markdown
+        content: |
+          ## Kostenmodul – Erträge, Kosten & Bilanz
+
+          Maestro berechnet aus den live gemessenen Leistungen (Netz, PV,
+          Akku, Haus) und deinen Tarifeinstellungen eine **vollständige
+          €-Bilanz pro Tag**. Alle Werte werden alle 5 Sekunden
+          aktualisiert, per HA-Storage **persistiert** (überleben Neustarts)
+          und um Mitternacht auf 0 zurückgesetzt.
+
+          Über `state_class: total_increasing` + `device_class: monetary`
+          erzeugt Home Assistant automatisch Langzeitstatistiken — damit
+          funktionieren auch **Wochen-, Monats- und Jahressummen** über das
+          Energy-Dashboard, `statistics-graph`-Karten oder Verbrauchszähler-
+          Helfer (Utility Meter).
+
+          ---
+
+          ### Sensoren der Kachel „💶 Erträge & Kosten heute"
+
+          | Sensor | Formel (kontinuierliche Integration über die Zeit) |
+          |---|---|
+          | **PV-Eigenverbrauch** (kWh) | ∫ `max(0, PV − Einspeisung) dt` — direkt verbrauchte oder in den Akku geladene PV-Energie |
+          | **PV-Ersparnis** (€) | ∫ `max(0, Haus − Netzbezug) · Kaufpreis dt` — Wert der Energie, die ohne PV/Akku aus dem Netz hätte gekauft werden müssen. Deckt sowohl `PV → Haus` als auch `Akku → Haus` ab. |
+          | **Einspeise-Erlös** (€) | ∫ `Einspeisung · Einspeisepreis dt` |
+          | **Netzbezugskosten** (€) | ∫ `Netzbezug · Kaufpreis dt` |
+          | **Netto-Stromkosten** (€) | `Netzbezugskosten − Einspeise-Erlös` (kann negativ werden = Tagesüberschuss) |
+          | **Akku-Verschleiß** (€) | ∫ `Akku-Durchsatz · €/kWh-Verschleiß dt` |
+          | **Energiebilanz** (€) | `Einspeise-Erlös + PV-Ersparnis − Netzbezugskosten − Akku-Verschleiß` |
+
+          *Integration:* Maestro multipliziert die aktuelle Leistung in
+          Watt mit dem Update-Intervall (5 s ≈ 0,00139 h) und summiert. Die
+          Tageswerte sind dadurch **monoton steigend** und Energy-Dashboard-
+          kompatibel.
+
+          ---
+
+          ### Welcher Strompreis wird verwendet?
+
+          | Tarif-Modus | Kaufpreis (Bezug) | Einspeisepreis |
+          |---|---|---|
+          | **Fixed** (Standard) | aus *Einstellungen → Fixer Strompreis* | aus *Einspeisevergütung* |
+          | **Dynamic** | **Live-Wert** des verknüpften Preissensors (Tibber, aWATTar, …) | aus *Einspeisevergütung* (Festwert) |
+
+          Bei dynamischem Tarif wird **in jedem 5-s-Zyklus der aktuelle
+          Spotpreis** aus dem Preissensor gelesen und auf den in dieser
+          Sekunde bezogenen Strom angewendet. Stundengrenzen und schnelle
+          Preiswechsel werden korrekt erfasst (kein 1/h-Snapshotting).
+
+          ---
+
+          ### Akku-Verschleißkosten
+
+          Berechnet aus deinen Hardware-Parametern (Tab Einstellungen →
+          Hardware):
+
+          ```
+          €/kWh-Durchsatz = Capex / (Total-Cycles × 2 × Kapazität)
+          ```
+
+          Beispiel: 8000 € / (5000 × 2 × 11 kWh) ≈ **0,073 €/kWh**.
+          Dieser Wert wird auf den **Akku-Durchsatz** (geladene + entladene
+          Energie) gerechnet und liefert eine realistische Untergrenze für
+          den Wirtschaftlichkeitsvergleich von Strategien.
+
+          ---
+
+          ### Wichtige Eigenschaften
+
+          - **Persistenz:** Werte werden in `.storage/e3dc_maestro_stats_*`
+            gesichert und nach einem HA-Neustart **wiederhergestellt**
+            (sofern noch derselbe Tag).
+          - **Mitternachts-Reset:** Punkt 00:00 lokaler Zeit werden alle
+            `*_heute`-Werte auf 0 gesetzt. HA's Statistik-Datenbank
+            archiviert die Tageswerte vorher → Long-Term-Aggregation
+            bleibt erhalten.
+          - **Kein Backfill:** Nach Installation/Reset werden Vergangenheits-
+            Tage **nicht** rekonstruiert. Sinnvolle Wochenwerte erscheinen
+            erst nach 7 vollen Tagen.
+          - **Wochen-/Monats-/Jahreswerte:** trag die Sensoren `Netzbezug
+            heute`, `Netzeinspeisung heute`, `Stromkosten heute` und
+            `Einspeise-Erlös heute` ins HA-Energy-Dashboard ein —
+            Tag/Woche/Monat/Jahr werden automatisch berechnet. Für eigene
+            Karten kannst du Verbrauchszähler-Helfer mit Reset-Zyklen
+            `daily/weekly/monthly/yearly` anlegen.
+
+          ---
+
+          ### Verknüpfung mit dem Auto-Optimierer
+
+          Stelle das Optimierungsziel auf **`cost`**, dann verwendet der
+          Auto-Optimierer **dieselben Preise wie diese Sensoren** und
+          maximiert direkt die `Energiebilanz heute`.
+          Siehe [→ Auto-Optimierung](/e3dc-maestro/help-auto).
+
           ---
 

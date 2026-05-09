@@ -38,11 +38,11 @@ class TestSimulateNext24h:
         result = _simulate()
         assert isinstance(result, ForecastResult)
 
-    def test_trajectory_length_is_24(self):
+    def test_trajectory_length_is_96(self):
         result = _simulate()
-        assert len(result.trajectory_soc) == 24
-        assert len(result.trajectory_hours) == 24
-        assert len(result.trajectory_phases) == 24
+        assert len(result.trajectory_soc) == 96
+        assert len(result.trajectory_hours) == 96
+        assert len(result.trajectory_phases) == 96
 
     def test_soc_bounded_0_to_100(self):
         result = _simulate(soc=5.0, cons=5000.0, pv=0.0)
@@ -148,7 +148,156 @@ class TestSimulateWithMorningCap:
         # At least some hours should be morning_cap (when SoC >= 30)
         # Starting at 25% with no PV/consumption → SoC stable, no cap triggered
         # Just test the simulation runs without errors
-        assert len(result.trajectory_soc) == 24
+        assert len(result.trajectory_soc) == 96
+
+
+class TestForecastCostAccounting:
+    """simulate_next_24h() cost and revenue accounting."""
+
+    def test_cost_nonzero_when_drawing_from_grid(self):
+        """Empty battery, no PV → draws from grid → cost_eur > 0."""
+        result = _simulate(soc=0.0, cons=2000.0, pv=0.0)
+        assert result.cost_eur > 0.0
+
+    def test_revenue_nonzero_when_feeding_in(self):
+        """Full battery, ample PV → feeds into grid → revenue_eur > 0."""
+        result = _simulate(soc=100.0, cons=300.0, pv=8000.0)
+        assert result.revenue_eur > 0.0
+
+    def test_cost_matches_fixed_price_approximation(self):
+        """With fixed buy price, cost ≈ grid_draw_kwh × buy_price."""
+        params = MaestroParams(
+            inverter_power=12000,
+            max_charge_power=5000,
+            min_charge_power=300,
+            installed_kwp=10.0,
+            feed_in_limit_percent=70.0,
+            charge_threshold=15.0,
+            battery_capacity_kwh=15.0,
+            fixed_buy_price=0.30,
+            feed_in_price=0.08,
+        )
+        result = simulate_next_24h(
+            soc=0.0,
+            consumption_h=[2000.0] * 24,
+            pv_h=[0.0] * 24,
+            params=params,
+            now=_NOW,
+            battery_capacity_kwh=15.0,
+        )
+        expected = round(result.grid_draw_kwh * 0.30, 2)
+        assert abs(result.cost_eur - expected) < 0.05, (
+            f"cost_eur={result.cost_eur} expected≈{expected}"
+        )
+
+    def test_price_q_overrides_fixed_price(self):
+        """When price_q is provided, cost uses per-quarter prices."""
+        params = MaestroParams(
+            inverter_power=12000,
+            max_charge_power=5000,
+            min_charge_power=300,
+            installed_kwp=10.0,
+            feed_in_limit_percent=70.0,
+            charge_threshold=15.0,
+            battery_capacity_kwh=15.0,
+            fixed_buy_price=0.30,
+            feed_in_price=0.08,
+        )
+        # price_q: all quarters 0.10 €/kWh (much cheaper than fixed 0.30)
+        price_q = [0.10] * 96
+        result_dyn = simulate_next_24h(
+            soc=0.0,
+            consumption_h=[2000.0] * 24,
+            pv_h=[0.0] * 24,
+            params=params,
+            now=_NOW,
+            battery_capacity_kwh=15.0,
+            price_q=price_q,
+        )
+        result_fixed = simulate_next_24h(
+            soc=0.0,
+            consumption_h=[2000.0] * 24,
+            pv_h=[0.0] * 24,
+            params=params,
+            now=_NOW,
+            battery_capacity_kwh=15.0,
+        )
+        # Same energy drawn, but cheaper per kWh
+        assert result_dyn.cost_eur < result_fixed.cost_eur
+        # Should be ≈ fixed_cost × (0.10/0.30)
+        ratio = result_dyn.cost_eur / result_fixed.cost_eur
+        assert abs(ratio - (0.10 / 0.30)) < 0.05, f"price ratio off: {ratio}"
+
+    def test_no_cost_no_revenue_with_self_sufficient_system(self):
+        """Ample PV + ample battery → minimal grid interaction → low cost/revenue."""
+        result = _simulate(soc=50.0, cons=500.0, pv=2000.0)
+        # System mostly self-sufficient; grid draw should be very small
+        assert result.grid_draw_kwh < 1.0
+        assert result.cost_eur < 0.50  # < 50 ct for the day
+
+
+class TestPvForecastResolution:
+    """Option A: simulate_next_24h() consumes 24/48/96 element pv arrays."""
+
+    def _params(self) -> MaestroParams:
+        return MaestroParams(
+            inverter_power=15000,
+            max_charge_power=5000,
+            min_charge_power=300,
+            installed_kwp=19.125,
+            feed_in_limit_percent=70.0,  # → 13388 W feed-in cap
+            charge_threshold=15.0,
+            battery_capacity_kwh=15.0,
+        )
+
+    def test_hourly_profile_misses_subhour_peak(self):
+        """A 30-min PV peak above the 70% cap is averaged away at hourly resolution.
+
+        Hour 12 contains a 14500 W peak in the second half-hour (above 13388 W
+        cap) and 7000 W in the first half. Hourly mean = 10750 W → no
+        curtailment visible in the simulator.
+        """
+        pv_h = [0.0] * 24
+        pv_h[12] = (7000.0 + 14500.0) / 2.0  # → 10750 W mean
+        result = simulate_next_24h(
+            soc=80.0,
+            consumption_h=[200.0] * 24,
+            pv_h=pv_h,
+            params=self._params(),
+            now=datetime(2026, 6, 15, 0, 0, tzinfo=timezone.utc),
+            battery_capacity_kwh=15.0,
+        )
+        assert result.pv_curtailed_kwh == pytest.approx(0.0, abs=0.05)
+
+    def test_halfhour_profile_exposes_subhour_peak(self):
+        """Same energy, but as 48-element half-hour profile → peak is visible."""
+        pv_48 = [0.0] * 48
+        # Hour 12 = slot 24 (first half) + 25 (second half)
+        pv_48[24] = 7000.0
+        pv_48[25] = 14500.0  # 1112 W over the 13388 W cap for 30 min
+        result = simulate_next_24h(
+            soc=80.0,
+            consumption_h=[200.0] * 24,
+            pv_h=pv_48,
+            params=self._params(),
+            now=datetime(2026, 6, 15, 0, 0, tzinfo=timezone.utc),
+            battery_capacity_kwh=15.0,
+        )
+        assert result.pv_curtailed_kwh > 0.3
+
+    def test_quarter_hour_profile_accepted(self):
+        """96-element profile is also accepted (15-min steps match natively)."""
+        pv_96 = [0.0] * 96
+        pv_96[48] = 14500.0  # one quarter of hour 12
+        result = simulate_next_24h(
+            soc=80.0,
+            consumption_h=[200.0] * 24,
+            pv_h=pv_96,
+            params=self._params(),
+            now=datetime(2026, 6, 15, 0, 0, tzinfo=timezone.utc),
+            battery_capacity_kwh=15.0,
+        )
+        assert result.pv_curtailed_kwh > 0.15
 
 
 class TestConsumptionStatsHourlyProfile:

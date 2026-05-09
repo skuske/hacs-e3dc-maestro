@@ -96,6 +96,7 @@ CONF_HP_MIN_PAUSE_MINUTES = "hp_min_pause_minutes"
 # Config entry keys – PV forecast (charge delay)
 CONF_PV_FORECAST_ENABLED = "pv_forecast_enabled"
 CONF_PV_FORECAST_SENSOR = "pv_forecast_sensor"        # entity_id, value = remaining kWh today
+CONF_PV_FORECAST_SENSOR_DAY2 = "pv_forecast_sensor_day2"  # optional: hourly forecast for tomorrow (Solcast: prognose_tag_3)
 CONF_PV_FORECAST_THRESHOLD_KWH = "pv_forecast_threshold_kwh"  # min remaining kWh to delay
 CONF_BATTERY_CAPACITY_KWH = "battery_capacity_kwh"    # usable capacity for sizing
 CONF_PV_FORECAST_SAFETY_FACTOR = "pv_forecast_safety_factor"  # forecast_remaining >= required * factor
@@ -331,6 +332,32 @@ DEFAULT_AUTO_MODE_ENABLED = False
 DEFAULT_AUTO_MODE_OBJECTIVE = "self_consumption"
 AUTO_MODE_OBJECTIVES = ["self_consumption", "cost", "co2"]
 
+# Tariff mode + cost tracking (v0.2.0)
+# tariff_mode steuert, ob Strategien aktiviert werden dürfen, die Netzenergie
+# in den Akku einspeisen (Forward-Looking, gentle_charge bei TARIFF_LOW, …).
+#  - "fixed":   Fester Tarif → Netzladung kategorisch verboten (außer Notfall,
+#               Feed-in-Limit-Schutz, Curtailment-Guard)
+#  - "dynamic": Dynamischer Tarif → Netzladung bei TARIFF_LOW erlaubt
+CONF_TARIFF_MODE = "tariff_mode"
+CONF_FIXED_BUY_PRICE = "fixed_buy_price"        # €/kWh Strombezug bei festem Tarif
+CONF_FEED_IN_PRICE = "feed_in_price"            # €/kWh Einspeisevergütung
+CONF_BATTERY_CAPEX_EUR = "battery_capex_eur"    # € Anschaffungskosten Speicher (für Wear-Cost)
+CONF_BATTERY_TOTAL_CYCLES = "battery_total_cycles"  # Lebensdauer-Vollzyklen lt. Hersteller
+
+TARIFF_MODE_FIXED = "fixed"
+TARIFF_MODE_DYNAMIC = "dynamic"
+TARIFF_MODES = [TARIFF_MODE_FIXED, TARIFF_MODE_DYNAMIC]
+
+DEFAULT_TARIFF_MODE = TARIFF_MODE_FIXED
+DEFAULT_FIXED_BUY_PRICE = 0.30
+DEFAULT_FEED_IN_PRICE = 0.08
+DEFAULT_BATTERY_CAPEX_EUR = 8000.0
+DEFAULT_BATTERY_TOTAL_CYCLES = 5000.0
+
+# Untergrenze, ab der "unjustified_grid_charge" anschlägt (kWh/Tag).
+# Verhindert False-Positives durch winzige Mess-Restbeiträge.
+UNJUSTIFIED_GRID_CHARGE_THRESHOLD_KWH = 0.5
+
 # Manual charge rate-limit
 MANUAL_CHARGE_MIN_INTERVAL_HOURS = 2
 
@@ -348,3 +375,14 @@ STAT_FEED_IN_INTERVENTIONS = "feed_in_interventions_today"
 STAT_CURTAILMENT_AVOIDED = "curtailment_avoided_today_kwh"
 STAT_FEED_IN_AVOIDED = "feed_in_avoided_today_kwh"
 STAT_PV_SAVED = "pv_saved_today_kwh"
+# v0.2.0: cost tracking + sanity check
+STAT_GRID_DRAW_TODAY = "grid_draw_today_kwh"          # kWh aus dem Netz bezogen
+STAT_GRID_FEED_IN_TODAY = "grid_feed_in_today_kwh"    # kWh ins Netz eingespeist
+STAT_GRID_TO_BATTERY_TODAY = "grid_to_battery_today_kwh"  # kWh Netz → Akku (Sanity)
+STAT_BATTERY_THROUGHPUT_TODAY = "battery_throughput_today_kwh"  # für Wear-Cost
+# v0.3.0: zeitvariable €-Akkumulation + Eigenverbrauch + Verschleiß
+STAT_COST_TODAY_EUR = "cost_today_eur"                # Bezugskosten heute (€), zeitvariabel
+STAT_FEED_IN_REVENUE_TODAY_EUR = "feed_in_revenue_today_eur"  # Einspeise-Erlös heute (€)
+STAT_PV_SELF_CONSUMPTION_TODAY = "pv_self_consumption_today_kwh"  # PV direkt → Haus (kWh)
+STAT_PV_SAVINGS_TODAY_EUR = "pv_savings_today_eur"   # vermiedener Bezug durch PV (€)
+STAT_BATTERY_WEAR_TODAY_EUR = "battery_wear_today_eur"  # Akku-Verschleiß heute (€)

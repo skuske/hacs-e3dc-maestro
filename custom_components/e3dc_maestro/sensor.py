@@ -97,7 +97,6 @@ SENSOR_DESCRIPTIONS: tuple[MaestroSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
         state_class=SensorStateClass.TOTAL_INCREASING,
-        entity_registry_enabled_default=False,
         value_fn=lambda coord: round(coord.stats.get("curtailment_avoided_today_kwh", 0), 3),
     ),
     MaestroSensorDescription(
@@ -108,6 +107,108 @@ SENSOR_DESCRIPTIONS: tuple[MaestroSensorDescription, ...] = (
         device_class=SensorDeviceClass.ENERGY,
         state_class=SensorStateClass.TOTAL_INCREASING,
         value_fn=lambda coord: round(coord.stats.get("pv_saved_today_kwh", 0), 3),
+    ),
+    # v0.2.0: Cost tracking
+    MaestroSensorDescription(
+        key="grid_draw_today",
+        name="Netzbezug heute",
+        icon="mdi:transmission-tower-import",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        value_fn=lambda coord: round(coord.stats.get("grid_draw_today_kwh", 0), 3),
+    ),
+    MaestroSensorDescription(
+        key="grid_feed_in_today",
+        name="Netzeinspeisung heute",
+        icon="mdi:transmission-tower-export",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        value_fn=lambda coord: round(coord.stats.get("grid_feed_in_today_kwh", 0), 3),
+    ),
+    MaestroSensorDescription(
+        key="kosten_heute",
+        name="Stromkosten heute",
+        icon="mdi:cash-minus",
+        native_unit_of_measurement="EUR",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        value_fn=lambda coord: round(coord.stats.get("cost_today_eur", 0), 2),
+    ),
+    MaestroSensorDescription(
+        key="einspeise_erloes_heute",
+        name="Einspeise-Erlös heute",
+        icon="mdi:cash-plus",
+        native_unit_of_measurement="EUR",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        value_fn=lambda coord: round(coord.stats.get("feed_in_revenue_today_eur", 0), 2),
+    ),
+    MaestroSensorDescription(
+        key="netto_kosten_heute",
+        name="Netto-Stromkosten heute",
+        icon="mdi:cash-sync",
+        native_unit_of_measurement="EUR",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        value_fn=lambda coord: round(
+            coord.stats.get("cost_today_eur", 0)
+            - coord.stats.get("feed_in_revenue_today_eur", 0),
+            2,
+        ),
+    ),
+    # v0.3.0: Eigenverbrauch, Ersparnis, Verschleiß, Bilanz
+    MaestroSensorDescription(
+        key="eigenverbrauch_heute",
+        name="PV-Eigenverbrauch heute",
+        icon="mdi:solar-power",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        value_fn=lambda coord: round(coord.stats.get("pv_self_consumption_today_kwh", 0), 3),
+    ),
+    MaestroSensorDescription(
+        key="pv_ersparnis_heute",
+        name="PV-Ersparnis heute",
+        icon="mdi:piggy-bank-outline",
+        native_unit_of_measurement="EUR",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        value_fn=lambda coord: round(coord.stats.get("pv_savings_today_eur", 0), 2),
+    ),
+    MaestroSensorDescription(
+        key="akku_verschleiss_heute",
+        name="Akku-Verschleiß heute",
+        icon="mdi:battery-minus-variant",
+        native_unit_of_measurement="EUR",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        value_fn=lambda coord: round(coord.stats.get("battery_wear_today_eur", 0), 3),
+    ),
+    MaestroSensorDescription(
+        key="bilanz_heute",
+        name="Energiebilanz heute",
+        icon="mdi:scale-balance",
+        native_unit_of_measurement="EUR",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        value_fn=lambda coord: round(
+            coord.stats.get("feed_in_revenue_today_eur", 0)
+            + coord.stats.get("pv_savings_today_eur", 0)
+            - coord.stats.get("cost_today_eur", 0)
+            - coord.stats.get("battery_wear_today_eur", 0),
+            2,
+        ),
+    ),
+    MaestroSensorDescription(
+        key="grid_to_battery_today",
+        name="Netz → Akku heute",
+        icon="mdi:battery-alert-variant-outline",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        value_fn=lambda coord: round(coord.stats.get("grid_to_battery_today_kwh", 0), 3),
     ),
     MaestroSensorDescription(
         key="debug_log",
@@ -129,7 +230,6 @@ SENSOR_DESCRIPTIONS: tuple[MaestroSensorDescription, ...] = (
         icon="mdi:battery-alert",
         native_unit_of_measurement="%",
         state_class=SensorStateClass.MEASUREMENT,
-        entity_registry_enabled_default=False,
         value_fn=lambda coord: coord.seasonal_reserve_soc,
     ),
     # Phase D: adaptive emergency reserve SoC
@@ -139,7 +239,6 @@ SENSOR_DESCRIPTIONS: tuple[MaestroSensorDescription, ...] = (
         icon="mdi:battery-charging-medium",
         native_unit_of_measurement="%",
         state_class=SensorStateClass.MEASUREMENT,
-        entity_registry_enabled_default=False,
         value_fn=lambda coord: coord.adaptive_reserve_soc,
     ),
     # Phase D: adaptive HT reserve SoC
@@ -149,7 +248,6 @@ SENSOR_DESCRIPTIONS: tuple[MaestroSensorDescription, ...] = (
         icon="mdi:battery-charging-medium",
         native_unit_of_measurement="%",
         state_class=SensorStateClass.MEASUREMENT,
-        entity_registry_enabled_default=False,
         value_fn=lambda coord: coord.adaptive_ht_reserve_soc,
     ),
     # F1+: Forward-Looking diagnostics
@@ -281,9 +379,11 @@ SENSOR_DESCRIPTIONS: tuple[MaestroSensorDescription, ...] = (
         key="auto_estimated_savings",
         name="Auto: Geschätzte Einsparung",
         icon="mdi:piggy-bank",
-        native_unit_of_measurement="%",
+        native_unit_of_measurement="EUR",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda coord: (
-            coord._auto_result.estimated_savings_pct
+            round(coord._auto_result.estimated_savings_eur, 3)
             if getattr(coord, "_auto_result", None) is not None
             and not coord._auto_result.fallback
             else None
@@ -432,13 +532,22 @@ class MaestroSensor(CoordinatorEntity[E3DCMaestroCoordinator], SensorEntity):
             fc = self.coordinator.forecast
             if fc is None:
                 return {"trajectory_points": [], "trajectory_soc": [], "trajectory_phases": []}
-            # Pre-compute [timestamp_ms, soc] pairs so data_generator needs no JS date math
+            # Pre-compute [timestamp_ms, soc] pairs so data_generator needs no JS date math.
+            # v0.3.0: trajectory has 96 quarter-hour entries (15-min spacing) instead of 24.
+            # Backward-compat: handle both lengths gracefully via len-based step calc.
             now_utc = datetime.now(timezone.utc)
-            base = now_utc.replace(minute=0, second=0, microsecond=0)
-            ms_per_hour = 3_600_000
+            n = len(fc.trajectory_soc)
+            # 24h total span → step_ms = 24h / n
+            step_ms = (24 * 3_600_000) // max(n, 1)
+            # Round base to the same grid the simulator used (15-min for n=96, 1h otherwise)
+            if n >= 96:
+                base = now_utc.replace(second=0, microsecond=0)
+                base = base.replace(minute=(base.minute // 15) * 15)
+            else:
+                base = now_utc.replace(minute=0, second=0, microsecond=0)
             base_ms = int(base.timestamp() * 1000)
             points = [
-                [base_ms + (i + 1) * ms_per_hour, v]
+                [base_ms + (i + 1) * step_ms, v]
                 for i, v in enumerate(fc.trajectory_soc)
             ]
             return {
@@ -479,15 +588,32 @@ class MaestroSensor(CoordinatorEntity[E3DCMaestroCoordinator], SensorEntity):
             res = getattr(self.coordinator, "_auto_result", None)
             last_run = getattr(self.coordinator, "_auto_last_run", None)
             fc = res.forecast if res else None
-            return {
-                "auto_mode_enabled": self.coordinator._params.auto_mode_enabled,
-                "objective": self.coordinator._params.auto_mode_objective,
+            base = res.baseline_forecast if res else None
+            params = self.coordinator._params
+            buy = getattr(params, "fixed_buy_price", 0.30)
+            sell = getattr(params, "feed_in_price", 0.08)
+
+            def _delta(a, b, ndigits=2):
+                if a is None or b is None:
+                    return None
+                return round(a - b, ndigits)
+
+            attrs = {
+                "auto_mode_enabled": params.auto_mode_enabled,
+                "objective": params.auto_mode_objective,
                 "last_run": last_run.isoformat() if last_run else None,
                 "fallback": res.fallback if res else None,
                 "fallback_reason": res.fallback_reason if res else None,
                 "overrides": res.overrides if res else {},
                 "grid_size": res.grid_size if res else 0,
+                "horizon_h": (
+                    48 if (fc and len(fc.trajectory_soc) > 96) else
+                    24 if fc else None
+                ),
                 "estimated_savings_pct": res.estimated_savings_pct if res and not res.fallback else None,
+                "estimated_savings_eur": res.estimated_savings_eur if res and not res.fallback else None,
+                "tariff_buy_price_eur_kwh": round(buy, 4),
+                "tariff_feed_in_price_eur_kwh": round(sell, 4),
                 # Simulated forecast (24h baseline-or-best result)
                 "sim_self_sufficiency": round(fc.self_sufficiency, 3) if fc and fc.self_sufficiency is not None else None,
                 "sim_curtailed_kwh": round(fc.pv_curtailed_kwh, 2) if fc else None,
@@ -495,7 +621,23 @@ class MaestroSensor(CoordinatorEntity[E3DCMaestroCoordinator], SensorEntity):
                 "sim_grid_draw_kwh": round(fc.grid_draw_kwh, 2) if fc else None,
                 "sim_min_soc": round(fc.min_soc, 1) if fc else None,
                 "sim_max_soc": round(fc.max_soc, 1) if fc else None,
+                # Baseline (= ohne Auto-Override)
+                "baseline_self_sufficiency": round(base.self_sufficiency, 3) if base and base.self_sufficiency is not None else None,
+                "baseline_curtailed_kwh": round(base.pv_curtailed_kwh, 2) if base else None,
+                "baseline_grid_feed_in_kwh": round(base.grid_feed_in_kwh, 2) if base else None,
+                "baseline_grid_draw_kwh": round(base.grid_draw_kwh, 2) if base else None,
+                "baseline_min_soc": round(base.min_soc, 1) if base else None,
+                # Live-Deltas (best − baseline) → was hat die Optimierung bewirkt?
+                "delta_grid_draw_kwh": _delta(fc.grid_draw_kwh, base.grid_draw_kwh) if fc and base else None,
+                "delta_grid_feed_in_kwh": _delta(fc.grid_feed_in_kwh, base.grid_feed_in_kwh) if fc and base else None,
+                "delta_curtailed_kwh": _delta(fc.pv_curtailed_kwh, base.pv_curtailed_kwh) if fc and base else None,
+                "delta_self_sufficiency": _delta(fc.self_sufficiency, base.self_sufficiency, ndigits=3) if fc and base else None,
+                "delta_min_soc": _delta(fc.min_soc, base.min_soc, ndigits=1) if fc and base else None,
+                # €-Aufschlüsselung der Einsparung (Forecast-basiert)
+                "savings_from_less_grid_draw_eur": round((base.grid_draw_kwh - fc.grid_draw_kwh) * buy, 3) if fc and base else None,
+                "savings_from_more_feed_in_eur": round((fc.grid_feed_in_kwh - base.grid_feed_in_kwh) * sell, 3) if fc and base else None,
             }
+            return attrs
         return None
 
 

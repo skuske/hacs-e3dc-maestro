@@ -47,6 +47,7 @@ from .const import (
     CONF_PRICE_SENSOR,
     CONF_PV_FORECAST_ENABLED,
     CONF_PV_FORECAST_SENSOR,
+    CONF_PV_FORECAST_SENSOR_DAY2,
     CONF_TOMORROW_PV_SENSOR,
     CONF_PV_POWER_SENSOR,
     CONF_SOC_SENSOR,
@@ -98,6 +99,15 @@ from .const import (
     STAT_FEED_IN_AVOIDED,
     STAT_FEED_IN_INTERVENTIONS,
     STAT_PV_SAVED,
+    STAT_GRID_DRAW_TODAY,
+    STAT_GRID_FEED_IN_TODAY,
+    STAT_GRID_TO_BATTERY_TODAY,
+    STAT_BATTERY_THROUGHPUT_TODAY,
+    STAT_COST_TODAY_EUR,
+    STAT_FEED_IN_REVENUE_TODAY_EUR,
+    STAT_PV_SELF_CONSUMPTION_TODAY,
+    STAT_PV_SAVINGS_TODAY_EUR,
+    STAT_BATTERY_WEAR_TODAY_EUR,
     WALLBOX_TYPE_E3DC,
 )
 from .control_engine import (
@@ -269,6 +279,15 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             STAT_CURTAILMENT_AVOIDED: 0.0,
             STAT_FEED_IN_AVOIDED: 0.0,
             STAT_PV_SAVED: 0.0,
+            STAT_GRID_DRAW_TODAY: 0.0,
+            STAT_GRID_FEED_IN_TODAY: 0.0,
+            STAT_GRID_TO_BATTERY_TODAY: 0.0,
+            STAT_BATTERY_THROUGHPUT_TODAY: 0.0,
+            STAT_COST_TODAY_EUR: 0.0,
+            STAT_FEED_IN_REVENUE_TODAY_EUR: 0.0,
+            STAT_PV_SELF_CONSUMPTION_TODAY: 0.0,
+            STAT_PV_SAVINGS_TODAY_EUR: 0.0,
+            STAT_BATTERY_WEAR_TODAY_EUR: 0.0,
         }
         self._last_stats_date: str | None = None
         # Persistence: store stats in HA's .storage so a restart preserves
@@ -647,6 +666,56 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         elif state_data.battery_power < 0:
             interval_h = self.update_interval.total_seconds() / 3600
             self.stats[STAT_DISCHARGED_TODAY] += abs(state_data.battery_power) / 1000 * interval_h
+
+        # v0.2.0 / v0.3.0: Grid energy bookkeeping for cost sensors + sanity check.
+        # grid_power: positiv = Einspeisung (über HA-Konvention im Setup), negativ = Bezug.
+        interval_h_g = self.update_interval.total_seconds() / 3600
+
+        # Current buy price: use price_sensor if dynamic, else fixed_buy_price.
+        _buy_price = getattr(self._params, "fixed_buy_price", 0.30)
+        if opts.get(CONF_DYNAMIC_TARIFF_ENABLED) and current_price is not None:
+            _buy_price = current_price
+        _feed_in_price = getattr(self._params, "feed_in_price", 0.08)
+
+        if state_data.grid_power > 0:
+            feed_kwh = state_data.grid_power / 1000 * interval_h_g
+            self.stats[STAT_GRID_FEED_IN_TODAY] += feed_kwh
+            self.stats[STAT_FEED_IN_REVENUE_TODAY_EUR] += feed_kwh * _feed_in_price
+        elif state_data.grid_power < 0:
+            grid_draw_w = abs(state_data.grid_power)
+            draw_kwh = grid_draw_w / 1000 * interval_h_g
+            self.stats[STAT_GRID_DRAW_TODAY] += draw_kwh
+            self.stats[STAT_COST_TODAY_EUR] += draw_kwh * _buy_price
+            # Grid → Akku: Netzbezug UND Akku lädt gleichzeitig.
+            if state_data.battery_power > 0:
+                gtb_w = min(grid_draw_w, state_data.battery_power)
+                self.stats[STAT_GRID_TO_BATTERY_TODAY] += gtb_w / 1000 * interval_h_g
+
+        # Throughput = |Akku-Leistung| für Wear-Cost-Berechnung.
+        throughput_kwh = abs(state_data.battery_power) / 1000 * interval_h_g
+        self.stats[STAT_BATTERY_THROUGHPUT_TODAY] += throughput_kwh
+        # Wear cost: capex / (cycles × 2 × capacity_kwh) × throughput
+        _cap = max(getattr(self._params, "battery_capacity_kwh", 10.0), 1.0)
+        _cycles = max(getattr(self._params, "battery_total_cycles", 5000.0), 100.0)
+        _capex = max(getattr(self._params, "battery_capex_eur", 8000.0), 0.0)
+        _wear_per_kwh = _capex / (_cycles * 2.0 * _cap)
+        self.stats[STAT_BATTERY_WEAR_TODAY_EUR] += throughput_kwh * _wear_per_kwh
+
+        # PV self-consumption = min(pv, house) per interval (nur direkter PV→Haus-Anteil)
+        pv_self_w = min(state_data.pv_power, state_data.house_power)
+        if pv_self_w > 0:
+            pv_self_kwh = pv_self_w / 1000 * interval_h_g
+            self.stats[STAT_PV_SELF_CONSUMPTION_TODAY] += pv_self_kwh
+
+        # Ersparnis = vermiedener Netzbezug durch Eigenversorgung (PV + Akku-Entladung).
+        # Logik: Alles, was der Hausverbrauch nicht aus dem Netz bezogen hat, hätte sonst
+        # Geld gekostet → das ist die echte Ersparnis. Deckt sowohl PV→Haus als auch
+        # Akku→Haus (z. B. nachts) ab.
+        grid_draw_w_for_savings = max(0.0, -state_data.grid_power)
+        self_supplied_w = max(0.0, state_data.house_power - grid_draw_w_for_savings)
+        if self_supplied_w > 0:
+            self_supplied_kwh = self_supplied_w / 1000 * interval_h_g
+            self.stats[STAT_PV_SAVINGS_TODAY_EUR] += self_supplied_kwh * _buy_price
 
         # E3/Phase 1: Track avoided curtailment energy
         if decision.phase == PHASE_CURTAILMENT_GUARD and decision.charge_power_limit is not None:
@@ -1198,17 +1267,31 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Supported attribute shapes:
         #   list[float]  len=24 → direct hourly W values
         #   list[dict]   with 'pv_estimate'/'value' + 'period_start' keys (Solcast)
-        pv_h_forecast = self._read_pv_forecast_profile(now)
+        pv_h_forecast = self._read_pv_forecast_profile(now, days_ahead=1)
         if pv_h_forecast is not None:
             pv_h = pv_h_forecast
+            # Sum is in W per slot — convert to kWh based on resolution
+            _slots_per_hour = max(1, len(pv_h_forecast) // 24)
+            _kwh_total = sum(pv_h_forecast) / 1000.0 / _slots_per_hour
             _LOGGER.warning(
-                "Auto-Optimizer: Tagesprognose genutzt (max=%.0f W, sum=%.1f kWh)",
-                max(pv_h_forecast), sum(pv_h_forecast) / 1000.0,
+                "Auto-Optimizer: Tagesprognose genutzt (max=%.0f W, sum=%.1f kWh, Auflösung=%d min)",
+                max(pv_h_forecast), _kwh_total, 60 // _slots_per_hour,
             )
         else:
             _LOGGER.warning(
                 "Auto-Optimizer: keine Tagesprognose gefunden \u2192 90d-Mittel (max=%.0f W)",
                 max(pv_h),
+            )
+
+        # Day-2 forecast (overmorrow relative to ``now``): when available,
+        # the optimizer extends its horizon to 48 h so a low end-of-day-1 SoC
+        # combined with a poor PV day 2 is correctly penalised.
+        pv_h_day2 = self._read_pv_forecast_profile(now, days_ahead=2)
+        if pv_h_day2 is not None:
+            _slots_per_hour_d2 = max(1, len(pv_h_day2) // 24)
+            _LOGGER.warning(
+                "Auto-Optimizer: Tag-2-Prognose genutzt (sum=%.1f kWh) \u2192 48 h-Horizont",
+                sum(pv_h_day2) / 1000.0 / _slots_per_hour_d2,
             )
 
         try:
@@ -1225,6 +1308,7 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 now,
                 cs.data_days,
                 pv.data_days,
+                pv_h_day2,
             )
         except Exception as err:
             _LOGGER.warning("Optimizer run failed: %s", err)
@@ -1457,22 +1541,20 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
         return value * factor
 
-    def _read_pv_forecast_profile(self, now: "datetime") -> list[float] | None:
-        """Try to read a 24h hourly PV forecast (W) from a Solcast/Forecast.Solar sensor.
+    def _read_pv_forecast_profile(
+        self, now: "datetime", days_ahead: int = 1
+    ) -> list[float] | None:
+        """Try to read a 24h PV forecast (W) from a Solcast/Forecast.Solar sensor.
 
-        Returns a list[float] of length 24 indexed by UTC hour-of-day, or None
-        if no forecast sensor is found.
+        Returns a list[float] with **either 24 hourly or 48 half-hourly** mean W
+        values (UTC). The simulator (forecast.py) auto-detects the resolution
+        from the array length; preserving the higher resolution lets the
+        optimiser see PV peaks above the feed-in limit that would otherwise be
+        averaged out by hourly bucketing (relevant for plants with strict
+        feed-in caps like the 70 % rule).
 
-        Strategy:
-        1. Try the configured ``pv_forecast_sensor`` (may be scalar – then skipped).
-        2. If it has no usable attribute, scan all sensor.* states for one with
-           ``detailedHourly`` / ``forecast`` / ``watt_hours`` covering tomorrow.
-
-        Supported attribute shapes (checked in order):
-        1. ``detailedHourly`` / ``forecast`` / ``hourly_data``: list of dicts
-           with ``pv_estimate`` (kW) + ``period_start`` (ISO datetime).
-        2. ``hourly_wh`` / ``watt_hours_period``: list of floats len=24.
-        3. ``watt_hours``: dict[str, float] with ISO datetime keys.
+        ``days_ahead`` selects which forecast day to extract (default 1 = the
+        day starting at midnight of ``now``). Use 2 for the day after.
         """
         import datetime as _dt
 
@@ -1482,23 +1564,25 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception:
                 return None
 
-        tomorrow = (now + _dt.timedelta(days=1)).date()
+        target_date = (now + _dt.timedelta(days=days_ahead)).date()
         # Profiles are indexed by UTC hour-of-day (matching consumption/pv stats).
         _UTC = _dt.timezone.utc
 
-        def _to_utc_hour(ts: _dt.datetime) -> tuple[_dt.date, int]:
+        def _to_utc_slot(ts: _dt.datetime) -> tuple[_dt.date, int, int]:
+            """Return (date, hour, minute) in UTC."""
             if ts.tzinfo is not None:
                 ts_utc = ts.astimezone(_UTC)
             else:
                 ts_utc = ts.replace(tzinfo=_UTC)
-            return ts_utc.date(), ts_utc.hour
+            return ts_utc.date(), ts_utc.hour, ts_utc.minute
 
         def _try_extract(attrs) -> list[float] | None:
             # Shape 1: list of dicts with period_start + pv_estimate (kW)
             for key in ("detailedHourly", "forecast", "hourly_data", "forecasts"):
                 raw = attrs.get(key)
                 if isinstance(raw, list) and raw and isinstance(raw[0], dict):
-                    buckets: list[list[float]] = [[] for _ in range(24)]
+                    # Collect into 48 half-hour buckets to preserve sub-hour peaks.
+                    halfhour: list[list[float]] = [[] for _ in range(48)]
                     for item in raw:
                         ts_str = (
                             item.get("period_start")
@@ -1510,8 +1594,8 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         ts = _parse_iso(str(ts_str))
                         if ts is None:
                             continue
-                        utc_date, utc_hour = _to_utc_hour(ts)
-                        if utc_date != tomorrow:
+                        utc_date, utc_hour, utc_minute = _to_utc_slot(ts)
+                        if utc_date != target_date:
                             continue
                         val = (
                             item.get("pv_estimate")
@@ -1523,10 +1607,39 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             val_w = float(val) * 1000.0  # kW → W
                         except (TypeError, ValueError):
                             continue
-                        buckets[utc_hour].append(val_w)
-                    profile = [sum(b) / len(b) if b else 0.0 for b in buckets]
-                    if any(v > 0 for v in profile):
-                        return profile
+                        slot = utc_hour * 2 + (1 if utc_minute >= 30 else 0)
+                        halfhour[slot].append(val_w)
+                    # Did we get genuine sub-hour data? (any hour has both halves filled)
+                    has_halfhour = any(
+                        halfhour[h * 2] and halfhour[h * 2 + 1]
+                        for h in range(24)
+                    )
+                    if has_halfhour:
+                        # Fill empty slots from the matching hour mean (rare gaps).
+                        profile_48 = []
+                        for h in range(24):
+                            a = halfhour[h * 2]
+                            b = halfhour[h * 2 + 1]
+                            if a and b:
+                                profile_48.append(sum(a) / len(a))
+                                profile_48.append(sum(b) / len(b))
+                            elif a or b:
+                                vals = a or b
+                                avg = sum(vals) / len(vals)
+                                profile_48.append(avg)
+                                profile_48.append(avg)
+                            else:
+                                profile_48.append(0.0)
+                                profile_48.append(0.0)
+                        if any(v > 0 for v in profile_48):
+                            return profile_48
+                    # Fallback to hourly resolution if data is hour-only.
+                    profile_24 = []
+                    for h in range(24):
+                        vals = halfhour[h * 2] + halfhour[h * 2 + 1]
+                        profile_24.append(sum(vals) / len(vals) if vals else 0.0)
+                    if any(v > 0 for v in profile_24):
+                        return profile_24
             # Shape 2: plain list len=24
             for key in ("hourly_wh", "watt_hours_period", "watt"):
                 raw = attrs.get(key)
@@ -1535,16 +1648,16 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         return [float(v) for v in raw]
                     except (TypeError, ValueError):
                         pass
-            # Shape 3: dict with ISO datetime keys → Wh
+            # Shape 3: dict with ISO datetime keys → Wh (hourly buckets)
             raw = attrs.get("watt_hours")
             if isinstance(raw, dict):
-                buckets = [[] for _ in range(24)]
+                buckets: list[list[float]] = [[] for _ in range(24)]
                 for k, v in raw.items():
                     ts = _parse_iso(str(k))
                     if ts is None:
                         continue
-                    utc_date, utc_hour = _to_utc_hour(ts)
-                    if utc_date != tomorrow:
+                    utc_date, utc_hour, _ = _to_utc_slot(ts)
+                    if utc_date != target_date:
                         continue
                     try:
                         buckets[utc_hour].append(float(v))
@@ -1560,7 +1673,12 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
 
         # 1. Try configured sensor first
-        sensor_id = opts.get(CONF_PV_FORECAST_SENSOR)
+        # For day-2 (days_ahead=2), prefer the dedicated day-2 sensor if configured
+        # (e.g. Solcast: prognose_tag_3). Falls back to main forecast sensor.
+        if days_ahead >= 2:
+            sensor_id = opts.get(CONF_PV_FORECAST_SENSOR_DAY2) or opts.get(CONF_PV_FORECAST_SENSOR)
+        else:
+            sensor_id = opts.get(CONF_PV_FORECAST_SENSOR)
         if sensor_id:
             state = self.hass.states.get(sensor_id)
             if state is not None and state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
@@ -1569,6 +1687,11 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     return profile
 
         # 2. Auto-detect: scan all sensor.* states for one with detailedHourly/forecast/watt_hours
+        # Only for days_ahead=1 — for day-2 we require the configured sensor to provide the data
+        # explicitly, otherwise integrations like Solcast (which auto-creates prognose_tag_3..7)
+        # would silently extend the horizon to 48 h without the user's awareness.
+        if days_ahead != 1:
+            return None
         for state in self.hass.states.async_all("sensor"):
             attrs = state.attributes
             if not any(
@@ -1645,6 +1768,7 @@ def _run_optimizer_sync(
     now,
     consumption_data_days: int,
     pv_data_days: int,
+    pv_h_day2: list[float] | None = None,
 ):
     """Thread-safe wrapper for run_optimizer (called via async_add_executor_job)."""
     return run_optimizer(
@@ -1659,5 +1783,9 @@ def _run_optimizer_sync(
         now=now,
         consumption_data_days=consumption_data_days,
         pv_data_days=pv_data_days,
+        pv_h_day2=pv_h_day2,
+        # Day-2 consumption: reuse the historic 7-day average (cons_h) since
+        # we don't have weekday-specific intra-day forecasts yet.
+        consumption_h_day2=cons_h if pv_h_day2 is not None else None,
     )
 
