@@ -49,7 +49,7 @@ E3DC Maestro läuft vollständig **lokal und ohne Cloud-Verbindung**. Es ergänz
 | **HT/NT-Schutz** | Entladesperre während der Hochtarif-Zeit |
 | **PV-Prognose-Verzögerung** | Laden verzögern, wenn Solcast/Forecast.Solar ausreichend PV ankündigt |
 | **Vorausschauendes Laden** | Ladeziel für morgen erhöhen wenn wenig PV erwartet wird |
-| **Ladeverteilung (Spreading)** | PV-Überschuss gleichmäßig über die verbleibende Ladezeit verteilen |
+| **Ladeverteilung (Spreading)** | PV-Überschuss gleichmäßig über die verbleibende Ladezeit verteilen – **seit v0.3.1 standardmäßig aktiv** (Hardware-Schutz vor 0/max-Bursts) |
 | **Morgen-Vorentladung** | Akku morgens vorentladen um tagsüber mehr PV aufnehmen zu können |
 | **Astro-Modus** | Ladeende/Ladestart dynamisch an Sonnenuntergang/Sonnenaufgang koppeln |
 | **Morning-Cap** | SoC-Deckel morgens, damit der Akku nicht zu früh voll ist |
@@ -188,6 +188,13 @@ Der Einrichtungsassistent führt durch **9 Schritte**. Alle Parameter können na
 
 Weist Maestro die Sensor-Entitäten aus `e3dc_rscp` (oder Modbus) zu.
 
+> **✨ Auto-Erkennung:** Wenn die `e3dc_rscp`-Integration installiert ist, schlägt
+> Maestro alle Sensoren automatisch vor (SoC, PV, Haus, Netz, Akku, Wallbox-Verbrauch).
+> Auch das Vorzeichen der Netzleistung wird für `_transfer_to_from_grid` automatisch invertiert.
+> Eine **openWB**-Wallbox wird ebenfalls erkannt (Pattern: `sensor.openwb_chargepoint*_ladeleistung`),
+> ebenso eine vorhandene **EVCC-Integration** ([marq24/ha-evcc](https://github.com/marq24/ha-evcc),
+> Domain `evcc_intg`). Du kannst alle Vorschläge überschreiben.
+
 | Feld | Pflicht | Typische Entity-ID | Konvention |
 |---|---|---|---|
 | **Ladezustand (SoC)** | ✓ | `sensor.<gerätename>_battery_rsoc` | 0–100 % |
@@ -298,20 +305,32 @@ Lädt den Akku aus dem Netz wenn der Börsenstrompreis günstig ist.
 
 ### Schritt 7: Wallbox
 
-Steuert die Ladeleistung der Wallbox nach PV-Überschuss.
+Steuert die Ladeleistung der Wallbox nach PV-Überschuss **und/oder** trennt den
+Wallbox-Verbrauch sauber vom Hausverbrauch ab.
 
 > **Hinweis zur nativen E3DC-Wallbox:** E3DC-Systeme regeln ihre integrierte Wallbox bereits eigenständig über das interne Energiemanagement — PV-Überschuss wird dabei automatisch zwischen Akku und Wallbox verteilt. Maestro kann über `set_wallbox_charging_current` nur den **maximalen Ladestrom begrenzen**, ersetzt aber nicht das E3DC-eigene Management. Der praktische Mehrwert für die native E3DC-Wallbox ist daher begrenzt.
 >
 > **Empfehlung:** Die Wallbox-Regelung ist primär sinnvoll für **Fremdwallboxen** (EVCC, generisch), die das E3DC nicht kennen und keine eigene Überschussregelung haben.
 
+#### Verbrauchstrennung Haus / Wallbox (seit v0.3.1)
+
+Wird ein **Wallbox-Powersensor** konfiguriert, separiert Maestro den EV-Ladeverbrauch vom Hausverbrauch.
+Dadurch werden EWMA-Glättung, PV-Forecast und der Optimizer **nicht durch Ladespitzen verfälscht**.
+Die Funktion ist unabhängig vom Schalter „Wallbox-Regelung“ — auch ohne aktive Maestro-Steuerung
+kannst du den Powersensor einbinden, um saubere Statistiken zu erhalten.
+
 | Parameter | Standard | Erläuterung |
 |---|---|---|
-| **Wallbox-Regelung** | aus | |
-| **Wallbox-Typ** | e3dc | `e3dc` = integrierte E3DC-Wallbox (Strombegrenzung); `generic` = EVCC / beliebige Wallbox |
+| **Wallbox-Regelung** | aus | Aktiviert die Strombegrenzungs-Logik |
+| **Wallbox-Typ** | e3dc | `e3dc` = integrierte E3DC-Wallbox (RSCP-Service); `generic` = openWB / EVCC / beliebige Wallbox via custom-Services |
+| **Wallbox-Powersensor** | – | W-Sensor des Wallbox-Verbrauchs (z. B. `sensor.<gerät>_wallbox_consumption` oder `sensor.openwb_chargepoint_4_ladeleistung`). Auto-erkannt. |
+| **Hausverbrauchszähler enthält die Wallbox bereits** | Auto | `false` bei E3DC-Wallbox (eigener Powermeter); `true` bei openWB am EVU-Hauptzähler. Ist die Option aktiv, wird der Wallbox-Wert vom Hausverbrauch abgezogen. |
 | **Minimalstrom (A)** | 6 | IEC-61851-Minimum |
 | **Maximalstrom (A)** | 16 | Maximal erlaubter Ladestrom |
 | **Phasenanzahl** | 3 | 1 oder 3 Phasen |
 | **Mindest-PV-Überschuss (W)** | 1 400 | Erst ab diesem Überschuss wird die Wallbox aktiviert |
+
+**Neue Sensoren:** `sensor.e3dc_maestro_wallbox_leistung` (W), `sensor.e3dc_maestro_gesamtlast_leistung` (W = Haus + Wallbox), `sensor.e3dc_maestro_wallbox_energie_heute` (kWh, Energy-Dashboard-tauglich).
 
 ---
 
@@ -466,7 +485,7 @@ Alle Switches können im Dashboard, in Automationen und über die UI bedient wer
 | `switch.e3dc_maestro_korridor_pause_min_ladeleistung` | Korridor-Pause | Hält Ladung an wenn Leistung unter Min-Grenze fiele |
 | `switch.e3dc_maestro_spat_ladung_two_tier` | Spät-Ladung (Two-Tier) | Zweites Ladeziel am Abend |
 | `switch.e3dc_maestro_vorentladung_tibber_auto` | Vorentladung Tibber-Auto | Automatische Vorentladung basierend auf Tibber-Preis |
-| `switch.e3dc_maestro_ladeverteilung_spreading` | Ladeverteilung (Spreading) | PV-Überschuss gleichmäßig verteilen |
+| `switch.e3dc_maestro_ladeverteilung_spreading` | Ladeverteilung (Spreading) | PV-Überschuss gleichmäßig verteilen (Default ON seit v0.3.1) |
 | `switch.e3dc_maestro_astro_modus_sonnenuberwachung` | Astro-Modus | Ladeende/start an Sonne koppeln |
 | `switch.e3dc_maestro_morning_cap_soc_deckel_morgens` | Morning-Cap | SoC-Deckel morgens aktiv |
 | `switch.e3dc_maestro_schonladung_reduzierte_ladeleistung` | Schonladung | Reduzierte Ladeleistung für Akkuschonung |
@@ -578,7 +597,7 @@ Maestro entscheidet **jeden Tick** (Standard: 30 s) in absteigender Priorität. 
 | 12 | `hard_soc_limit` | SoC ≥ Hard-SoC-Limit | Laden blockieren (1 W Sentinel) |
 | 13 | `corridor` | SoC < Tagesziel | Saisonal laden |
 | 14 | `pv_delay` | Korridor aktiv, aber PV-Prognose ausreichend | Warten auf PV |
-| 15 | `spreading` | Korridor aktiv + Spreading ein | Ladeleistung zeitlich verteilen |
+| 15 | `spreading` | Korridor aktiv + Spreading ein (Default ON) | Ladeleistung zeitlich verteilen, sanfte Ladekurve |
 | 16 | `curtailment_guard` | Abregelschutz-Flag aktiv | Mindest-Ladeleistung halten |
 | 17 | `idle` | Kein Handlungsbedarf | clear_power_limits (E3DC übernimmt) |
 

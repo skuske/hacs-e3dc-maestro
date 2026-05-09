@@ -146,19 +146,63 @@ def simulate_next_24h(
         """Look up PV value at (hour, minute) for variable-resolution arrays.
 
         Supported lengths: 24 (hourly), 48 (30-min), 96 (15-min).
-        Higher resolution preserves PV peaks above the feed-in limit
-        that would otherwise be averaged out at hourly granularity.
+        Für 96/48 wird der Slot direkt indiziert (Solcast-Peaks bleiben
+        erhalten). Für 24 (Hourly) wird **linear zwischen den
+        Stunden-Samples interpoliert**, damit der Sub-Hour-Verlauf nicht
+        als Stufenfunktion in den Forecast fällt (sonst entstehen
+        sichtbare Mini-Treppen am Stundenwechsel).
+        Energieerhaltung: Mittel über die 4 Quartale einer Stunde ≈
+        arithmetisches Mittel der benachbarten Stunden-Samples.
         """
         n = len(arr)
         if n >= 96:
             return float(arr[hour * 4 + minute // 15])
         if n >= 48:
             return float(arr[hour * 2 + (1 if minute >= 30 else 0)])
-        return float(arr[hour])
+        # 24 Stundenwerte → linear interpolieren.
+        # arr[hour] = Mittelwert der Stunde, fixiert bei minute=30.
+        a = float(arr[hour % 24])
+        frac = (minute - 30) / 60.0
+        if frac < 0:
+            prev = float(arr[(hour - 1) % 24])
+            return prev + (a - prev) * (frac + 1.0)
+        b = float(arr[(hour + 1) % 24])
+        return a + (b - a) * frac
+
+    def _cons_lookup(arr: list[float], hour: int, minute: int) -> float:
+        """Linear interpolation of hourly consumption between samples.
+
+        Verbrauchs-Array hat 24 Stundenwerte. Ohne Interpolation ist
+        ``cons_w`` innerhalb einer Stunde konstant → Slope-Sprung am
+        Stundenwechsel. Mit Interpolation analog zu :func:`_pv_lookup`.
+        """
+        a = float(arr[hour % 24])
+        frac = (minute - 30) / 60.0
+        if frac < 0:
+            prev = float(arr[(hour - 1) % 24])
+            return prev + (a - prev) * (frac + 1.0)
+        b = float(arr[(hour + 1) % 24])
+        return a + (b - a) * frac
 
     for q in range(_STEPS):
         sim_now = base + timedelta(minutes=_STEP_MINUTES * (q + 1))
-        hour_idx = sim_now.hour  # 0–23 UTC
+        # Lookup-Stunde für PV-/Verbrauchs-Profile: diese Arrays sind in
+        # ConsumptionStats und _read_pv_forecast_profile nach UTC-Stunde
+        # gebucketed. ``sim_now`` wird vom Coordinator mit ``dt_util.now()``
+        # (lokal) erzeugt, daher ist ``sim_now.hour`` lokale Zeit. Ohne
+        # Konvertierung greifen wir bei lokal 04:30 (Sommer) auf den
+        # UTC-04-Slot = 06:00 lokal zu, was den Forecast vor Sonnenaufgang
+        # fälschlich als „PV vorhanden" markiert.
+        if sim_now.tzinfo is not None:
+            sim_now_utc = sim_now.astimezone(timezone.utc)
+        else:
+            sim_now_utc = sim_now.replace(tzinfo=timezone.utc)
+        lookup_hour = sim_now_utc.hour
+        lookup_minute = sim_now_utc.minute
+        # ``hour_idx`` (für Trajectory-Output und Quarter-Indizes) bleibt in
+        # lokaler Zeit, damit price_q (lokale Tarifslots) und Trajektorie-
+        # Beschriftung weiterhin stimmen.
+        hour_idx = sim_now.hour
 
         # Day-1 vs day-2 lookup based on elapsed hours from base
         elapsed_h = (sim_now - base).total_seconds() / 3600.0
@@ -172,8 +216,8 @@ def simulate_next_24h(
         # Quarter-of-day index for price_q lookup (0–95, only valid in day 1)
         quarter_idx = hour_idx * 4 + sim_now.minute // _STEP_MINUTES
 
-        cons_w = max(0.0, float(cons_arr[hour_idx]))
-        pv_w = max(0.0, _pv_lookup(pv_arr, hour_idx, sim_now.minute))
+        cons_w = max(0.0, _cons_lookup(cons_arr, lookup_hour, lookup_minute))
+        pv_w = max(0.0, _pv_lookup(pv_arr, lookup_hour, lookup_minute))
 
         # Approximate grid for state construction (grid balances the system)
         pv_surplus_w = pv_w - cons_w  # positive = export without battery

@@ -211,7 +211,7 @@ views:
             tap_action:
               action: more-info
           - type: custom:mushroom-entity-card
-            entity: sensor.e3dc_maestro_einspeiselimit_gesichert_heute
+            entity: sensor.e3dc_maestro_abregelung_verhindert_heute
             name: Einspeiselimit gesichert
             icon: mdi:shield-check
             icon_color: teal
@@ -303,7 +303,7 @@ views:
             name: Geladen (kWh)
           - entity: sensor.e3dc_maestro_entladen_heute
             name: Entladen (kWh)
-          - entity: sensor.e3dc_maestro_einspeiselimit_gesichert_heute
+          - entity: sensor.e3dc_maestro_abregelung_verhindert_heute
             name: Einspeiselimit gesichert (kWh)
 
       # ── 💶 Erträge & Kosten heute ─────────────────────
@@ -1406,7 +1406,7 @@ views:
             name: Notstromreserve (aktuell, %)
           - entity: sensor.e3dc_maestro_saisonales_ladeende_stunde
             name: Saisonales Ladeende (Uhrzeit)
-          - entity: sensor.e3dc_maestro_einspeiselimit_gesichert_heute
+          - entity: sensor.e3dc_maestro_abregelung_verhindert_heute
             name: Einspeiselimit gesichert (kWh heute)
 
       - type: entities
@@ -2240,6 +2240,15 @@ views:
           
           > Diese Funktion ist **unabhängig von der EVCC-Akku-Entladesperre**. Beide
           > Schalter können separat aktiviert werden.
+          
+          > **Verbrauchstrennung (seit v0.3.1):** Wird im Konfigurations-Wizard ein
+          > **Wallbox-Powersensor** hinterlegt (E3DC-RSCP-Wallbox oder
+          > `sensor.openwb_chargepoint_*_ladeleistung`), trennt Maestro den
+          > EV-Verbrauch sauber vom Hausverbrauch ab — EWMA-Glättung, PV-Forecast und
+          > Optimizer werden nicht mehr durch Ladespitzen verfälscht. Sichtbar über
+          > `sensor.e3dc_maestro_wallbox_leistung` und
+          > `sensor.e3dc_maestro_gesamtlast_leistung`. Diese Trennung greift auch
+          > **ohne** aktive Wallbox-Regelung.
           
           ---
           

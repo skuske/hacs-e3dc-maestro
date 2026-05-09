@@ -34,6 +34,23 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.config_entries.async_update_entry(entry, options=new_options, version=2)
         _LOGGER.info("Migrated E3DC Maestro config entry to version 2 (power_factor removed)")
 
+    if entry.version < 3:
+        # v0.3.1: spreading_enabled wird zum Hardware-Schutz-Default.
+        # Bestehende Installationen, die den Schalter nie explizit gesetzt haben
+        # (oder ihn auf False stehen haben), werden auf True umgestellt, damit
+        # die Auto-Lade-Bursts (0 W ↔ max_charge_power) nicht weiter Hardware
+        # stressen. Wer das bewusst nicht möchte, kann den Switch im UI wieder
+        # ausschalten.
+        new_options = dict(entry.options)
+        if not new_options.get("spreading_enabled", False):
+            new_options["spreading_enabled"] = True
+            _LOGGER.info(
+                "E3DC Maestro v0.3.1: Spreading (Ladeverteilung) automatisch "
+                "aktiviert – schützt die Hardware vor 0/max-Lade-Bursts. "
+                "Kann im UI deaktiviert werden."
+            )
+        hass.config_entries.async_update_entry(entry, options=new_options, version=3)
+
     return True
 
 

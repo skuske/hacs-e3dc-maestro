@@ -148,10 +148,14 @@ class MaestroState:
     """Current measured values, read from HA sensor entities."""
     soc: float               # % 0-100
     pv_power: float          # W, positive = generating
-    house_power: float       # W, positive = consuming
+    house_power: float       # W, positive = consuming (PURE Haushalt OHNE Wallbox)
     grid_power: float        # W, positive = feed-in to grid
     battery_power: float     # W, positive = charging
     pv_forecast_remaining_kwh: float | None = None  # remaining PV today (kWh)
+    # Wallbox-Verbrauch separat (W). 0 wenn nicht konfiguriert. Wird NICHT in
+    # die Optimierungs-/Korridor-Logik einbezogen, damit EV-Spitzen nicht den
+    # Hausverbrauch verfälschen. Reine Telemetrie + getrennter kWh-Zähler.
+    wallbox_power: float = 0.0
     # EVCC state (D1)
     evcc_charging: bool = False          # True when EV is actively charging
     evcc_mode: str | None = None         # EVCC charging mode: "now", "pv", "minpv", …
@@ -237,7 +241,7 @@ class MaestroParams:
     evcc_now_value: str = "now"  # State-Wert der den 'Sofortladen'-Modus signalisiert
     evcc_discharge_limit_w: float = 0  # max Entladeleistung bei EVCC Now-Modus (W, 0 = vollständig sperren)
     # E2: Prognosebasiertes Spreading (Ladeverteilung)
-    spreading_enabled: bool = False
+    spreading_enabled: bool = True
     spreading_target_soc: float = 100.0  # Ziel-SoC für die Ladeverteilung (Standard: 100 %)
     # E3/Phase 1: Curtailment Guard
     curtailment_guard_enabled: bool = True
@@ -1149,17 +1153,29 @@ def decide(
                 and previous_phase_since is not None
                 and (now - previous_phase_since).total_seconds() < FEED_IN_PV_DELAY_COOLDOWN_S
             )
+            # Bei aktivem Spreading hat die zeitbasierte Spreading-Rate Vorrang
+            # über pv_delay. Sonst preempted pv_delay die Spreading-Phase und
+            # fällt durch charge_power_limit=None auf den E3DC-Default zurück
+            # → Wechselrichter lädt mit voller PV-Überschussleistung statt
+            # gleichmäßig über das Tagesfenster. Analog zur Korridor-Pause
+            # weiter unten.
             if (
                 state.pv_forecast_remaining_kwh >= min_required
                 and hour_now < charge_end_h
                 and state.soc >= params.delay_min_soc
                 and _pv_delay_cooldown_ok
+                and not (params.spreading_enabled and state.soc < BATTERY_FULL_SOC_CEILING)
             ):
                 floor_note = (
                     f", Floor {params.delay_min_soc:.0f}%"
                     if params.delay_min_soc > 0
                     else ""
                 )
+                # power_mode=NORMAL + charge_power_limit=0 → sendet max_charge=0
+                # an den E3DC (Lade-Sperre), lässt aber die Entladung frei.
+                # Das Haus darf weiter aus dem Akku versorgt werden, z. B.
+                # bei kurzen PV-Einbrüchen durch Bewölkung. Discharge-Sperre
+                # ist ausschließlich der Notstromreserve vorbehalten.
                 return MaestroDecision(
                     phase=PHASE_PV_DELAY,
                     reason=(
@@ -1168,15 +1184,24 @@ def decide(
                         f"(SoC {state.soc:.0f}% → Ziel {target:.0f}%{floor_note})"
                     ),
                     power_mode=POWER_MODE_NORMAL,
-                    charge_power_limit=None,
+                    charge_power_limit=0.0,
                     target_soc=target,
                 )
         # 7b. Lower-corridor pause: if charge power too low and no curtailment → idle
+        # ABER: bei aktivem Spreading hat die zeitbasierte Spreading-Rate
+        # Vorrang. Sonst entstehen Treppen, weil time_to_target_power knapp
+        # über interim-target winzige Leistungen liefert (< lower_corridor)
+        # → IDLE → Pause → Lücke wächst → CORRIDOR feuert hart → Pause …
+        # Mit spreading_enabled fällt der Code stattdessen durch zur
+        # Spreading-Phase und produziert eine glatte Ladekurve.
         if (
             params.lower_corridor_pause_enabled
             and charge_power < params.lower_corridor
             and not curtailment_guard_active
+            and not (params.spreading_enabled and state.soc < BATTERY_FULL_SOC_CEILING)
         ):
+            # charge_power_limit=0.0 → max_charge=0 (Ladung blockiert),
+            # Entladung bleibt frei (Haus darf aus dem Akku versorgt werden).
             return MaestroDecision(
                 phase=PHASE_IDLE,
                 reason=(
@@ -1184,9 +1209,53 @@ def decide(
                     f"< unterer Korridor {params.lower_corridor:.0f} W"
                 ),
                 power_mode=POWER_MODE_NORMAL,
-                charge_power_limit=None,
+                charge_power_limit=0.0,
                 target_soc=target,
             )
+        # 7c. Spreading-Cap auf Korridor: Wenn Spreading aktiv ist, begrenzt
+        # die zeitbasierte Spreading-Rate (kWh bis Ladeende / Restzeit) zusätzlich
+        # die Korridor-Leistung. Damit wird auch im Korridor (SoC < charge_target)
+        # auf eine sanfte, gleichmäßige Ladekurve geglättet, statt dass der
+        # Wechselrichter zwischen 0 W und max_charge_power oszilliert. Die
+        # Spreading-Obergrenze bleibt das Spreading-Ziel (typ. 100 %), damit
+        # die Rate konsistent ist mit der Phase nach Erreichen von charge_target.
+        smoothing_note = ""
+        if (
+            params.spreading_enabled
+            and state.soc < BATTERY_FULL_SOC_CEILING
+        ):
+            _cap_upper_soc = (
+                params.charge_target_late
+                if params.two_tier_enabled
+                else params.spreading_target_soc
+            )
+            if state.soc < _cap_upper_soc:
+                _charge_end_h = seasonal_charge_end_hour(now, params)
+                _hour_now = now.hour + now.minute / 60
+                _cap_end_h = (
+                    params.late_charge_end_h
+                    if params.two_tier_enabled and _hour_now >= _charge_end_h
+                    else _charge_end_h
+                )
+                _remaining_hours = _cap_end_h - _hour_now
+                if _remaining_hours > 0:
+                    _remaining_kwh = (
+                        (_cap_upper_soc - state.soc) / 100.0
+                        * params.battery_capacity_kwh
+                    )
+                    _smooth_rate_w = _remaining_kwh * 1000.0 / _remaining_hours
+                    # Cap nicht unter min_charge_power drücken – sonst Anlauf-
+                    # Probleme. Auf max_charge_power clampen für Konsistenz.
+                    _smooth_rate_w = max(
+                        params.min_charge_power,
+                        min(params.max_charge_power, _smooth_rate_w),
+                    )
+                    if _smooth_rate_w < charge_power:
+                        smoothing_note = (
+                            f", Glättung {_smooth_rate_w:.0f}W "
+                            f"({_remaining_kwh:.1f}kWh/{_remaining_hours:.1f}h)"
+                        )
+                        charge_power = _smooth_rate_w
         effective_charge = _apply_house_ceiling(
             charge_power, state, params, PHASE_CORRIDOR, current_price,
             tariff_class=tariff_class,
@@ -1195,7 +1264,7 @@ def decide(
             phase=PHASE_CORRIDOR,
             reason=(
                 f"Ladekorridor: SoC {state.soc:.0f}% → Ziel {target:.0f}%, "
-                f"Leistung {effective_charge:.0f}W"
+                f"Leistung {effective_charge:.0f}W{smoothing_note}"
             ),
             power_mode=POWER_MODE_NORMAL,
             charge_power_limit=effective_charge if effective_charge > 0 else None,
@@ -1212,7 +1281,10 @@ def decide(
     )
     # Akku-voll-Schutz: oberhalb der Sättigungsschwelle gibt es nichts mehr zu
     # verteilen – jegliche zusätzliche Ladeleistung wäre wirkungslos.
-    if state.soc >= BATTERY_FULL_SOC_CEILING:
+    # Außerdem: Bei aktivem Abregelschutz hat dieser Vorrang, damit sonst
+    # abgeregelte PV-Leistung als Senke in den Akku darf (sonst würde
+    # Spreading mit ~1–2 kW limitieren und der Rest würde abgeregelt).
+    if state.soc >= BATTERY_FULL_SOC_CEILING or curtailment_guard_active:
         _spread_active = False
     else:
         _spread_active = params.spreading_enabled and state.soc < _spread_upper_soc
@@ -1249,6 +1321,8 @@ def decide(
                     tariff_class=tariff_class,
                 )
                 if spreading_rate_w < params.min_charge_power:
+                    # charge_power_limit=0.0 statt None: blockiert Ladung,
+                    # Entladung bleibt frei (Haus darf aus Akku ziehen).
                     return MaestroDecision(
                         phase=PHASE_IDLE,
                         reason=(
@@ -1257,7 +1331,7 @@ def decide(
                             f"< Min-Ladeleistung {params.min_charge_power:.0f}\u202fW"
                         ),
                         power_mode=POWER_MODE_NORMAL,
-                        charge_power_limit=None,
+                        charge_power_limit=0.0,
                         target_soc=target,
                     )
                 return MaestroDecision(

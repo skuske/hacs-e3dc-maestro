@@ -194,6 +194,57 @@ class TestCorridor:
         assert decision.charge_power_limit is not None
         assert decision.charge_power_limit >= params.min_charge_power
 
+    def test_spreading_caps_corridor_power_advanced(self):
+        """advanced_corridor mit aggressivem upper_corridor (8 kW) erzeugt im
+        Korridor hohe Ladeleistung. Wenn spreading_enabled=True, muss die
+        zeitbasierte Spreading-Rate die Korridor-Leistung deckeln."""
+        # 11:00 in Mai, SoC=20, target_soc_for_time≈49 → Korridor aktiv.
+        # advanced_corridor liefert ~ lower + (29/100)*(8000-200) ≈ 2462 W.
+        # Spreading-Rate (100-20)/100*16 kWh / 7.5 h ≈ 1707 W → kappt.
+        state = MaestroState(soc=20, pv_power=8000, house_power=500, grid_power=0, battery_power=0)
+        params = MaestroParams(**{
+            **DEFAULT_PARAMS.__dict__,
+            "ht_enabled": False,
+            "charge_target": 85,
+            "spreading_enabled": True,
+            "spreading_target_soc": 100,
+            "battery_capacity_kwh": 16.0,
+            "advanced_corridor": True,
+            "lower_corridor": 200,
+            "upper_corridor": 8000,
+            "max_charge_power": 8000,
+            "min_charge_power": 200,
+            "summer_charge_end": 18.5,
+        })
+        decision = decide(state, params, _now(5, 15, 11))
+        assert decision.phase == PHASE_CORRIDOR
+        assert decision.charge_power_limit is not None
+        assert decision.charge_power_limit <= 2200, (
+            f"Erwartete geglättete Leistung ≤ 2.2 kW, erhielt "
+            f"{decision.charge_power_limit:.0f} W"
+        )
+        assert "Glättung" in decision.reason
+
+    def test_no_smoothing_when_spreading_disabled(self):
+        """Ohne Spreading-Switch wird die Korridor-Leistung nicht zusätzlich
+        gekappt (der Switch bleibt der explizite Opt-In für Glättung)."""
+        state = MaestroState(soc=20, pv_power=8000, house_power=500, grid_power=0, battery_power=0)
+        params = MaestroParams(**{
+            **DEFAULT_PARAMS.__dict__,
+            "ht_enabled": False,
+            "charge_target": 85,
+            "spreading_enabled": False,
+            "battery_capacity_kwh": 16.0,
+            "advanced_corridor": True,
+            "lower_corridor": 200,
+            "upper_corridor": 8000,
+            "max_charge_power": 8000,
+            "summer_charge_end": 18.5,
+        })
+        decision = decide(state, params, _now(5, 15, 11))
+        assert decision.phase == PHASE_CORRIDOR
+        assert "Glättung" not in decision.reason
+
     def test_idle_when_soc_at_target(self):
         state = MaestroState(soc=90, pv_power=1000, house_power=800, grid_power=0, battery_power=0)
         params = MaestroParams(**{**DEFAULT_PARAMS.__dict__, "ht_enabled": False, "charge_target": 85})
@@ -293,6 +344,7 @@ def _params_with_forecast(threshold: float = 5.0, capacity: float = 10.0, factor
         battery_capacity_kwh=capacity,
         pv_forecast_safety_factor=factor,
         lower_corridor_pause_enabled=False,  # isolate forecast logic from corridor-pause
+        spreading_enabled=False,  # isolate forecast logic from spreading exemption
     )
     return p
 
@@ -309,7 +361,11 @@ class TestPvForecastDelay:
         decision = decide(state, params, _now(6, 15, 9))
         from custom_components.e3dc_maestro.const import PHASE_PV_DELAY
         assert decision.phase == PHASE_PV_DELAY
-        assert decision.charge_power_limit is None
+        # Lade-Sperre: charge_power_limit=0.0 → max_charge=0 an E3DC.
+        # Entladung bleibt frei (discharge_power_limit=None) damit das Haus
+        # bei kurzen PV-Einbrüchen aus dem Akku versorgt werden kann.
+        assert decision.charge_power_limit == 0.0
+        assert decision.discharge_power_limit is None
 
     def test_charges_when_forecast_insufficient(self):
         params = _params_with_forecast(threshold=5.0, capacity=10.0, factor=1.2)
@@ -438,6 +494,48 @@ class TestPvForecastDelay:
         )
         from custom_components.e3dc_maestro.const import PHASE_PV_DELAY
         assert decision.phase == PHASE_PV_DELAY
+
+    def test_pv_delay_skipped_when_spreading_enabled(self):
+        """With spreading active, pv_delay must NOT preempt the spreading phase.
+
+        Andernfalls f\u00e4llt charge_power_limit=None auf den E3DC-Default zur\u00fcck
+        (clear_power_limits) und der Akku l\u00e4dt mit voller PV-\u00dcberschussleistung
+        statt gleichm\u00e4\u00dfig \u00fcber das Tagesfenster.
+        """
+        params = _params_with_forecast(threshold=5.0, capacity=10.0, factor=1.2)
+        params.spreading_enabled = True  # explicitly enable
+        params.spreading_target_soc = 100.0
+        state = MaestroState(
+            soc=30, pv_power=2000, house_power=500, grid_power=0, battery_power=0,
+            pv_forecast_remaining_kwh=8.0,
+        )
+        decision = decide(state, params, _now(6, 15, 9))
+        from custom_components.e3dc_maestro.const import PHASE_PV_DELAY, PHASE_SPREADING
+        assert decision.phase != PHASE_PV_DELAY
+        # Spreading sollte greifen (oder corridor, falls SoC < target)
+        assert decision.phase in (PHASE_SPREADING, "corridor")
+
+    def test_pv_delay_blocks_charging_but_allows_discharge(self):
+        """pv_delay sendet max_charge=0 an den E3DC, l\u00e4sst Entladung aber frei.
+
+        Wenn das Haus bei kurzen PV-Einbr\u00fcchen aus dem Akku versorgt werden
+        m\u00f6chte, darf die Entladung nicht gesperrt werden. Nur die
+        Notstromreserve-Phase blockiert die Entladung.
+        """
+        params = _params_with_forecast(threshold=5.0, capacity=10.0, factor=1.2)
+        state = MaestroState(
+            soc=30, pv_power=0, house_power=500, grid_power=0, battery_power=0,
+            pv_forecast_remaining_kwh=8.0,
+        )
+        decision = decide(state, params, _now(6, 15, 9))
+        from custom_components.e3dc_maestro.const import (
+            PHASE_PV_DELAY,
+            POWER_MODE_NORMAL,
+        )
+        assert decision.phase == PHASE_PV_DELAY
+        assert decision.power_mode == POWER_MODE_NORMAL  # NICHT IDLE \u2192 Discharge frei
+        assert decision.charge_power_limit == 0.0       # Ladung blockiert
+        assert decision.discharge_power_limit is None    # Entladung frei
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -920,6 +1018,10 @@ class TestCurtailmentGuard:
         base = {
             **DEFAULT_PARAMS.__dict__,
             "ht_enabled": False,
+            # Spreading is on by default (v0.3.2 hardware-protection); these
+            # tests focus on Curtailment-Guard hysteresis, so disable spreading
+            # to keep the test scope narrow.
+            "spreading_enabled": False,
             "curtailment_guard_enabled": True,
             "curtailment_activation_w": 1500,
             "curtailment_release_w": 500,
@@ -1015,6 +1117,9 @@ class TestLowerCorridorPause:
         base = {
             **DEFAULT_PARAMS.__dict__,
             "ht_enabled": False,
+            # Tests focus on lower_corridor_pause; disable spreading to keep
+            # the test free of the v0.3.2 default-on hardware protection.
+            "spreading_enabled": False,
             "lower_corridor_pause_enabled": True,
             "lower_corridor": 500,
             # Small battery + SoC near target → time-to-target rate < lower_corridor
@@ -1037,6 +1142,29 @@ class TestLowerCorridorPause:
         )
         decision = decide(state, p, _now(6, 15, 10))
         assert decision.phase == PHASE_IDLE
+
+    def test_spreading_overrides_corridor_pause(self):
+        """Mit spreading_enabled darf lower_corridor_pause NICHT zu IDLE führen,
+        sonst entsteht im Forecast und Live-Betrieb ein Treppen-Pendel
+        zwischen IDLE-Pause und Korridor-Burst.
+        """
+        p = self._lcp_params(
+            spreading_enabled=True,
+            spreading_target_soc=100,
+            lower_corridor=500,
+            min_charge_power=300,
+            battery_capacity_kwh=5.0,
+            charge_target=85,
+        )
+        # Gleicher Setup wie Pause-Test: soc knapp über interim-target
+        state = MaestroState(
+            soc=84, pv_power=2000, house_power=500, grid_power=0, battery_power=0,
+        )
+        decision = decide(state, p, _now(6, 15, 10))
+        # Spreading muss übernehmen statt IDLE
+        assert decision.phase == PHASE_SPREADING
+        assert decision.charge_power_limit is not None
+        assert decision.charge_power_limit >= p.min_charge_power
 
     def test_corridor_pause_disabled_still_charges(self):
         """When lower_corridor_pause_enabled=False, charge below lower_corridor → CORRIDOR."""

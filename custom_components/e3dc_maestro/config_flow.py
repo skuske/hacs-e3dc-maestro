@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import voluptuous as vol
@@ -9,7 +10,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.const import PERCENTAGE, UnitOfPower
 from homeassistant.core import callback
-from homeassistant.helpers import selector
+from homeassistant.helpers import entity_registry as er, selector
 
 from .const import (
     CONF_ADDITIONAL_GENERATION_SENSOR,
@@ -28,6 +29,7 @@ from .const import (
     CONF_BATTERY_TOTAL_CYCLES,
     CONF_TARIFF_MODE,
     CONF_GRID_POWER_SENSOR,
+    CONF_GRID_POWER_INVERT,
     CONF_HP_ENABLED,
     CONF_HP_MAX_PRICE,
     CONF_HP_MIN_PAUSE_MINUTES,
@@ -67,10 +69,13 @@ from .const import (
     CONF_UPDATE_INTERVAL,
     CONF_UPPER_CORRIDOR,
     CONF_WALLBOX_ENABLED,
+    CONF_WALLBOX_INCLUDED_IN_HOUSE,
     CONF_WALLBOX_MAX_CURRENT,
     CONF_WALLBOX_MIN_CURRENT,
     CONF_WALLBOX_MIN_SURPLUS,
     CONF_WALLBOX_PHASES,
+    CONF_WALLBOX_POWER_SENSOR,
+    CONF_WALLBOX_PROVIDER,
     CONF_WALLBOX_SERVICE_OFF,
     CONF_WALLBOX_SERVICE_ON,
     CONF_WALLBOX_TYPE,
@@ -166,6 +171,11 @@ from .const import (
     E3DC_RSCP_DOMAIN,
     WALLBOX_TYPE_E3DC,
     WALLBOX_TYPE_GENERIC,
+    WALLBOX_PROVIDERS,
+    WALLBOX_PROVIDER_E3DC,
+    WALLBOX_PROVIDER_OPENWB,
+    DEFAULT_WALLBOX_PROVIDER,
+    DEFAULT_WALLBOX_INCLUDED_IN_HOUSE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -175,6 +185,237 @@ def _entity_selector(domain: str = "sensor") -> selector.EntitySelector:
     return selector.EntitySelector(
         selector.EntitySelectorConfig(domain=domain)
     )
+
+
+# RSCP-Suffix-Mapping (E3DC RSCP Integration von Torben Nehmer).
+# Der Präfix ist gerätenamen-abhängig (z. B. sensor.s10e_pro_, sensor.s10_*),
+# der Suffix ist bei der Integration stabil.
+_RSCP_SUFFIX_MAP: dict[str, str] = {
+    CONF_SOC_SENSOR:                     "_state_of_charge",
+    CONF_PV_POWER_SENSOR:                "_solar_production",
+    CONF_ADDITIONAL_GENERATION_SENSOR:   "_additional_production",
+    CONF_HOUSE_POWER_SENSOR:             "_house_consumption",
+    CONF_GRID_POWER_SENSOR:              "_transfer_to_from_grid",
+    CONF_BATTERY_POWER_SENSOR:           "_battery_net_change",
+    CONF_BATTERY_CHARGED_TODAY_SENSOR:   "_battery_charge_today",
+    CONF_BATTERY_DISCHARGED_TODAY_SENSOR:"_battery_discharge_today",
+    # Wallbox-Verbrauchszähler (E3DC RSCP, sumiert über alle Wallboxen)
+    CONF_WALLBOX_POWER_SENSOR:           "_wallbox_consumption",
+}
+
+
+_OPENWB_CP_RE = re.compile(r"openwb_chargepoint_?(\d+)_")
+
+# Domain der inoffiziellen evcc-HA-Integration (marq24/ha-evcc).
+_EVCC_INTG_DOMAIN = "evcc_intg"
+
+
+def _autodetect_evcc(hass) -> dict[str, Any]:
+    """Detect entities provided by the marq24/ha-evcc integration.
+
+    Looks up entities registered under the ``evcc_intg`` config entry and
+    matches per-loadpoint suffixes:
+    - ``binary_sensor.*_charging`` → ``evcc_charging_entity``
+    - ``select.*_mode``            → ``evcc_mode_entity``
+
+    The evcc loadpoint mode select uses ``"now"`` for instant charging,
+    which matches the existing ``DEFAULT_EVCC_NOW_VALUE``. If multiple
+    loadpoints exist, the alphabetically first match wins (deterministic).
+
+    Returns an empty dict if no evcc integration is configured.
+    """
+    entries = hass.config_entries.async_entries(_EVCC_INTG_DOMAIN)
+    if not entries:
+        return {}
+    entry_ids = {e.entry_id for e in entries}
+    registry = er.async_get(hass)
+    charging_candidates: list[str] = []
+    mode_candidates: list[str] = []
+    for ent in registry.entities.values():
+        if ent.config_entry_id not in entry_ids:
+            continue
+        eid = ent.entity_id
+        if eid.startswith("binary_sensor.") and eid.endswith("_charging"):
+            charging_candidates.append(eid)
+        elif eid.startswith("select.") and eid.endswith("_mode"):
+            mode_candidates.append(eid)
+    out: dict[str, Any] = {}
+    if charging_candidates:
+        out[CONF_EVCC_CHARGING_ENTITY] = sorted(charging_candidates)[0]
+    if mode_candidates:
+        out[CONF_EVCC_MODE_ENTITY] = sorted(mode_candidates)[0]
+    if out:
+        out[CONF_EVCC_ENABLED] = True
+        out[CONF_EVCC_NOW_VALUE] = DEFAULT_EVCC_NOW_VALUE  # "now"
+    return out
+
+
+def _autodetect_openwb_wallbox(hass) -> str | None:
+    """Find an openWB chargepoint power sensor.
+
+    openWB exposes per-chargepoint power as ``sensor.openwb_chargepoint_<N>_ladeleistung``
+    where ``<N>`` varies by installation. We pick the first match from the entity
+    registry. If multiple chargepoints exist, the lowest-numbered one wins.
+    """
+    registry = er.async_get(hass)
+    candidates: list[tuple[int, str]] = []
+    for ent in registry.entities.values():
+        eid = ent.entity_id
+        if not eid.startswith("sensor.openwb_chargepoint"):
+            continue
+        if not eid.endswith("_ladeleistung"):
+            continue
+        m = _OPENWB_CP_RE.search(eid)
+        if not m:
+            continue
+        candidates.append((int(m.group(1)), eid))
+    if not candidates:
+        return None
+    candidates.sort()
+    return candidates[0][1]
+
+
+def _autodetect_rscp_sources(hass) -> dict[str, Any]:
+    """Resolve default sensor entity_ids from the e3dc_rscp integration via suffix matching.
+
+    Also detects openWB chargepoint sensors as a fallback wallbox source when no
+    E3DC wallbox sensor is present.
+    """
+    out: dict[str, Any] = {}
+    rscp_entries = hass.config_entries.async_entries(E3DC_RSCP_DOMAIN)
+    if rscp_entries:
+        entry_ids = {e.entry_id for e in rscp_entries}
+        registry = er.async_get(hass)
+        rscp_sensor_ids = [
+            ent.entity_id
+            for ent in registry.entities.values()
+            if ent.config_entry_id in entry_ids and ent.entity_id.startswith("sensor.")
+        ]
+        for key, suffix in _RSCP_SUFFIX_MAP.items():
+            match = next((eid for eid in rscp_sensor_ids if eid.endswith(suffix)), None)
+            if match:
+                out[key] = match
+    # _transfer_to_from_grid liefert positiv = Bezug → Vorzeichen automatisch invertieren.
+    grid = out.get(CONF_GRID_POWER_SENSOR, "")
+    if isinstance(grid, str) and grid.endswith("_transfer_to_from_grid"):
+        out[CONF_GRID_POWER_INVERT] = True
+    # Wallbox automatisch konfigurieren, wenn der RSCP-Sensor existiert.
+    # E3DC-Wallbox hat einen eigenen Powermeter → NICHT im Hausverbrauch enthalten.
+    if out.get(CONF_WALLBOX_POWER_SENSOR):
+        out.setdefault(CONF_WALLBOX_PROVIDER, WALLBOX_PROVIDER_E3DC)
+        out.setdefault(CONF_WALLBOX_TYPE, WALLBOX_TYPE_E3DC)
+        out.setdefault(CONF_WALLBOX_INCLUDED_IN_HOUSE, False)
+    else:
+        # Fallback: openWB-Chargepoint suchen. Pattern: sensor.openwb_chargepoint*ladeleistung
+        openwb = _autodetect_openwb_wallbox(hass)
+        if openwb:
+            out[CONF_WALLBOX_POWER_SENSOR] = openwb
+            out[CONF_WALLBOX_PROVIDER] = WALLBOX_PROVIDER_OPENWB
+            # openWB ist keine E3DC-Wallbox → Steuerlogik = generic.
+            out[CONF_WALLBOX_TYPE] = WALLBOX_TYPE_GENERIC
+            # openWB misst typischerweise nur den Chargepoint; der Hauszähler steht
+            # am EVU und enthält die Wallbox-Leistung bereits → True als Default.
+            out[CONF_WALLBOX_INCLUDED_IN_HOUSE] = True
+    # EVCC-Integration (marq24/ha-evcc) ist orthogonal zur Wallbox-Quelle
+    # → unabhängig erkennen und mit auffüllen.
+    out.update(_autodetect_evcc(hass))
+    return out
+
+
+# Mapping CONF_KEY → (RSCP-Suffix, multiplier).
+# multiplier=1000 für kW→W-Konversion, =1 wenn die Einheit bereits passt.
+_RSCP_SYSTEM_PARAM_MAP: dict[str, tuple[str, float]] = {
+    CONF_INSTALLED_KWP:          ("_installed_peak_power", 1.0),       # kW → kW
+    CONF_INVERTER_POWER:         ("_maximum_ac_power", 1000.0),        # kW → W
+    CONF_MAX_CHARGE_POWER:       ("_system_maximum_charge", 1000.0),   # kW → W
+    CONF_FEED_IN_LIMIT_PERCENT:  ("_derate_feed_above", 1.0),          # % → %
+    CONF_BATTERY_CAPACITY_KWH:   ("_installed_battery_capacity", 1.0), # kWh → kWh
+}
+
+# Anzeige-Labels und Einheiten für Auto-Detect-Übersicht.
+_RSCP_SYSTEM_PARAM_LABELS: dict[str, tuple[str, str]] = {
+    CONF_INSTALLED_KWP:          ("PV-Leistung",      "kWp"),
+    CONF_INVERTER_POWER:         ("WR-Nennleistung",  "W"),
+    CONF_MAX_CHARGE_POWER:       ("Max. Ladeleistung","W"),
+    CONF_FEED_IN_LIMIT_PERCENT:  ("Einspeisegrenze",  "%"),
+    CONF_BATTERY_CAPACITY_KWH:   ("Batteriekapazität","kWh"),
+}
+
+
+def _autodetect_rscp_system_params(hass) -> dict[str, Any]:
+    """Read numeric system parameters (Wechselrichter, Batterie, Einspeisegrenze) from RSCP states."""
+    rscp_entries = hass.config_entries.async_entries(E3DC_RSCP_DOMAIN)
+    if not rscp_entries:
+        return {}
+    entry_ids = {e.entry_id for e in rscp_entries}
+    registry = er.async_get(hass)
+    rscp_sensor_ids = [
+        ent.entity_id
+        for ent in registry.entities.values()
+        if ent.config_entry_id in entry_ids and ent.entity_id.startswith("sensor.")
+    ]
+    out: dict[str, Any] = {}
+    for key, (suffix, mult) in _RSCP_SYSTEM_PARAM_MAP.items():
+        eid = next((s for s in rscp_sensor_ids if s.endswith(suffix)), None)
+        if not eid:
+            continue
+        state = hass.states.get(eid)
+        if state is None or state.state in (None, "", "unknown", "unavailable"):
+            continue
+        try:
+            value = float(state.state) * mult
+        except (TypeError, ValueError):
+            continue
+        # Prozent runden, sonst auf 1 Nachkommastelle für kWh / saubere Watt-Werte
+        if key == CONF_FEED_IN_LIMIT_PERCENT:
+            out[key] = round(value)
+        elif mult == 1000.0:
+            out[key] = round(value)
+        else:
+            out[key] = round(value, 2)
+    return out
+
+
+def _format_system_detection(detected: dict[str, Any]) -> str:
+    """Render detected system params as a markdown bullet list for description placeholder."""
+    if not detected:
+        return "_(keine Werte aus RSCP-Diagnose verfügbar)_"
+    lines = []
+    for key, (label, unit) in _RSCP_SYSTEM_PARAM_LABELS.items():
+        if key in detected:
+            suffix = " _(Brutto – bitte unten Netto/nutzbar eintragen)_" if key == CONF_BATTERY_CAPACITY_KWH else ""
+            lines.append(f"- {label}: **{detected[key]} {unit}**{suffix}")
+    return "\n".join(lines) if lines else "_(keine Werte aus RSCP-Diagnose verfügbar)_"
+
+
+def _format_sources_detection(detected: dict[str, Any]) -> str:
+    """Render detected source sensors as a markdown bullet list."""
+    if not detected:
+        return "_(keine RSCP-Sensoren erkannt)_"
+    # Nur Sensor-IDs (entity_id-Strings) auflisten; Bool-/Provider-Flags separat ausweisen.
+    skip_keys = {
+        CONF_GRID_POWER_INVERT,
+        CONF_WALLBOX_PROVIDER,
+        CONF_WALLBOX_INCLUDED_IN_HOUSE,
+        CONF_EVCC_ENABLED,
+        CONF_EVCC_NOW_VALUE,
+    }
+    sensor_lines = [
+        f"- `{eid}`"
+        for k, eid in detected.items()
+        if k not in skip_keys
+    ]
+    if detected.get(CONF_GRID_POWER_INVERT):
+        sensor_lines.append("- _Vorzeichen Netzleistung invertiert (positiv = Bezug)_")
+    if detected.get(CONF_WALLBOX_PROVIDER):
+        sensor_lines.append(
+            f"- _Wallbox-Provider erkannt: **{detected[CONF_WALLBOX_PROVIDER]}**_"
+        )
+    if detected.get(CONF_EVCC_ENABLED):
+        sensor_lines.append(
+            f"- _EVCC-Integration erkannt (Sofortlade-Wert: `{detected.get(CONF_EVCC_NOW_VALUE, '')}`)_"
+        )
+    return "\n".join(sensor_lines)
 
 
 def _number_selector(
@@ -202,6 +443,7 @@ STEP_SOURCES_SCHEMA = vol.Schema(
         vol.Optional(CONF_ADDITIONAL_GENERATION_SENSOR): _entity_selector(),
         vol.Required(CONF_HOUSE_POWER_SENSOR): _entity_selector(),
         vol.Required(CONF_GRID_POWER_SENSOR): _entity_selector(),
+        vol.Optional(CONF_GRID_POWER_INVERT, default=False): selector.BooleanSelector(),
         vol.Required(CONF_BATTERY_POWER_SENSOR): _entity_selector(),
         vol.Optional(CONF_BATTERY_CHARGED_TODAY_SENSOR): _entity_selector(),
         vol.Optional(CONF_BATTERY_DISCHARGED_TODAY_SENSOR): _entity_selector(),
@@ -215,6 +457,7 @@ STEP_SYSTEM_SCHEMA = vol.Schema(
         vol.Required(CONF_MIN_CHARGE_POWER, default=DEFAULT_MIN_CHARGE_POWER): _number_selector(50, 5000, 50, "W"),
         vol.Required(CONF_INSTALLED_KWP, default=DEFAULT_INSTALLED_KWP): _number_selector(0.5, 100.0, 0.5, "kWp"),
         vol.Required(CONF_FEED_IN_LIMIT_PERCENT, default=DEFAULT_FEED_IN_LIMIT_PERCENT): _number_selector(0, 100, 1, "%"),
+        vol.Required(CONF_BATTERY_CAPACITY_KWH, default=DEFAULT_BATTERY_CAPACITY_KWH): _number_selector(1, 100, 0.5, "kWh"),
         vol.Required(CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL): _number_selector(10, 120, 5, "s"),
         vol.Optional(CONF_ADVANCED_CORRIDOR, default=False): selector.BooleanSelector(),
         vol.Optional(CONF_LOWER_CORRIDOR, default=DEFAULT_LOWER_CORRIDOR): _number_selector(0, 5000, 50, "W"),
@@ -282,6 +525,15 @@ STEP_WALLBOX_SCHEMA = vol.Schema(
                 mode=selector.SelectSelectorMode.DROPDOWN,
             )
         ),
+        # Separater Wallbox-Verbrauchszähler (entkoppelt EV-Last vom Hausverbrauch).
+        # Funktioniert unabhängig von WALLBOX_ENABLED – auch wer keine Steuerung
+        # über Maestro macht, kann hier seinen openWB/E3DC-Powermeter einbinden,
+        # damit Optimizer/Forecast/EWMA nicht durch Ladespitzen verfälscht werden.
+        vol.Optional(CONF_WALLBOX_POWER_SENSOR): _entity_selector(),
+        vol.Optional(
+            CONF_WALLBOX_INCLUDED_IN_HOUSE,
+            default=DEFAULT_WALLBOX_INCLUDED_IN_HOUSE,
+        ): selector.BooleanSelector(),
         vol.Optional(CONF_WALLBOX_MIN_CURRENT, default=DEFAULT_WALLBOX_MIN_CURRENT): _number_selector(6, 32, 1, "A"),
         vol.Optional(CONF_WALLBOX_MAX_CURRENT, default=DEFAULT_WALLBOX_MAX_CURRENT): _number_selector(6, 32, 1, "A"),
         vol.Optional(CONF_WALLBOX_PHASES, default=DEFAULT_WALLBOX_PHASES): selector.SelectSelector(
@@ -342,16 +594,13 @@ STEP_PV_FORECAST_SCHEMA = vol.Schema(
             CONF_PV_FORECAST_THRESHOLD_KWH, default=DEFAULT_PV_FORECAST_THRESHOLD_KWH
         ): _number_selector(0, 100, 0.5, "kWh"),
         vol.Optional(
-            CONF_BATTERY_CAPACITY_KWH, default=DEFAULT_BATTERY_CAPACITY_KWH
-        ): _number_selector(1, 100, 0.5, "kWh"),
-        vol.Optional(
             CONF_PV_FORECAST_SAFETY_FACTOR, default=DEFAULT_PV_FORECAST_SAFETY_FACTOR
         ): _number_selector(1.0, 3.0, 0.05),
         vol.Optional(
             CONF_DELAY_MIN_SOC, default=DEFAULT_DELAY_MIN_SOC
         ): _number_selector(0, 80, 5, "%"),
-        # Spreading
-        vol.Optional(CONF_SPREADING_ENABLED, default=False): selector.BooleanSelector(),
+        # Spreading (Default: ON – Hardware-Schutz vor 0/8 kW-Bursts)
+        vol.Optional(CONF_SPREADING_ENABLED, default=True): selector.BooleanSelector(),
         vol.Optional(
             CONF_SPREADING_TARGET_SOC, default=DEFAULT_SPREADING_TARGET_SOC
         ): _number_selector(50, 100, 1, "%"),
@@ -567,7 +816,7 @@ class _TariffSlotsMixin:
 class E3DCMaestroConfigFlow(_TariffSlotsMixin, ConfigFlow, domain=DOMAIN):
     """Multi-step config flow for E3DC Maestro."""
 
-    VERSION = 2
+    VERSION = 3
     _data: dict[str, Any] = {}
 
     def _slot_state(self) -> dict[str, Any]:
@@ -591,7 +840,17 @@ class E3DCMaestroConfigFlow(_TariffSlotsMixin, ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self._data.update(user_input)
             return await self.async_step_system()
-        return self.async_show_form(step_id="sources", data_schema=STEP_SOURCES_SCHEMA)
+        detected = _autodetect_rscp_sources(self.hass)
+        suggested = {**detected, **self._data}
+        schema = self.add_suggested_values_to_schema(STEP_SOURCES_SCHEMA, suggested)
+        return self.async_show_form(
+            step_id="sources",
+            data_schema=schema,
+            description_placeholders={
+                "detected_count": str(len([k for k in detected if k != CONF_GRID_POWER_INVERT])),
+                "detected_list": _format_sources_detection(detected),
+            },
+        )
 
     async def async_step_system(
         self, user_input: dict[str, Any] | None = None
@@ -600,7 +859,20 @@ class E3DCMaestroConfigFlow(_TariffSlotsMixin, ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self._data.update(user_input)
             return await self.async_step_season()
-        return self.async_show_form(step_id="system", data_schema=STEP_SYSTEM_SCHEMA)
+        auto = _autodetect_rscp_system_params(self.hass)
+        # Batteriekapazität ist BRUTTO – nicht als Vorschlag ins Feld schreiben,
+        # User soll Netto/nutzbare Kapazität eintragen. Wert bleibt in der Übersicht sichtbar.
+        auto_for_fields = {k: v for k, v in auto.items() if k != CONF_BATTERY_CAPACITY_KWH}
+        suggested = {**auto_for_fields, **self._data}
+        schema = self.add_suggested_values_to_schema(STEP_SYSTEM_SCHEMA, suggested)
+        return self.async_show_form(
+            step_id="system",
+            data_schema=schema,
+            description_placeholders={
+                "detected_count": str(len(auto)),
+                "detected_list": _format_system_detection(auto),
+            },
+        )
 
     async def async_step_season(
         self, user_input: dict[str, Any] | None = None
@@ -645,7 +917,18 @@ class E3DCMaestroConfigFlow(_TariffSlotsMixin, ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self._data.update(user_input)
             return await self.async_step_evcc()
-        return self.async_show_form(step_id="wallbox", data_schema=STEP_WALLBOX_SCHEMA)
+        # Auto-Detect Wallbox-Felder als Default-Vorschläge mitführen.
+        auto = _autodetect_rscp_sources(self.hass)
+        wb_keys = {
+            CONF_WALLBOX_TYPE,
+            CONF_WALLBOX_PROVIDER,
+            CONF_WALLBOX_POWER_SENSOR,
+            CONF_WALLBOX_INCLUDED_IN_HOUSE,
+        }
+        suggested = {k: v for k, v in auto.items() if k in wb_keys}
+        suggested.update({k: v for k, v in self._data.items() if k in wb_keys})
+        schema = self.add_suggested_values_to_schema(STEP_WALLBOX_SCHEMA, suggested)
+        return self.async_show_form(step_id="wallbox", data_schema=schema)
 
     async def async_step_evcc(
         self, user_input: dict[str, Any] | None = None
@@ -654,7 +937,11 @@ class E3DCMaestroConfigFlow(_TariffSlotsMixin, ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self._data.update(user_input)
             return await self.async_step_heatpump()
-        return self.async_show_form(step_id="evcc", data_schema=STEP_EVCC_SCHEMA)
+        # Auto-Detect der evcc_intg-Integration (marq24/ha-evcc).
+        auto = _autodetect_evcc(self.hass)
+        suggested = {**auto, **self._data}
+        schema = self.add_suggested_values_to_schema(STEP_EVCC_SCHEMA, suggested)
+        return self.async_show_form(step_id="evcc", data_schema=schema)
 
     async def async_step_heatpump(
         self, user_input: dict[str, Any] | None = None
@@ -723,19 +1010,49 @@ class E3DCMaestroOptionsFlow(_TariffSlotsMixin, OptionsFlow):
     ) -> dict[str, Any]:
         # Load current options on first call (self.config_entry available from HA 2023.9+)
         self._options = dict(self.config_entry.options)
-        return await self.async_step_sources(user_input)
+        return await self.async_step_sources()
 
     async def async_step_sources(self, user_input: dict[str, Any] | None = None) -> dict[str, Any]:
         if user_input is not None:
             self._options.update(user_input)
             return await self.async_step_system()
-        return self.async_show_form(step_id="sources", data_schema=self._prefilled(STEP_SOURCES_SCHEMA))
+        auto = _autodetect_rscp_sources(self.hass)
+        # Für die Anzeige IMMER alle erkannten Werte zeigen, auch wenn nicht übernommen.
+        detected_for_display = dict(auto)
+        # Wenn grid_power_sensor bereits manuell konfiguriert ist, das invert-Flag
+        # aus dem Auto-Detect NICHT übernehmen – sonst würden alte User mit
+        # export_to_grid fälschlicherweise invert=True bekommen.
+        if CONF_GRID_POWER_SENSOR in self._options:
+            auto.pop(CONF_GRID_POWER_INVERT, None)
+        suggested = {**auto, **self._options}
+        schema = self.add_suggested_values_to_schema(STEP_SOURCES_SCHEMA, suggested)
+        return self.async_show_form(
+            step_id="sources",
+            data_schema=schema,
+            description_placeholders={
+                "detected_count": str(len([k for k in detected_for_display if k != CONF_GRID_POWER_INVERT])),
+                "detected_list": _format_sources_detection(detected_for_display),
+            },
+        )
 
     async def async_step_system(self, user_input: dict[str, Any] | None = None) -> dict[str, Any]:
         if user_input is not None:
             self._options.update(user_input)
             return await self.async_step_season()
-        return self.async_show_form(step_id="system", data_schema=self._prefilled(STEP_SYSTEM_SCHEMA))
+        # Bestehende Options haben Vorrang; Auto-Detect füllt nur fehlende Felder.
+        auto = _autodetect_rscp_system_params(self.hass)
+        # Batteriekapazität ist BRUTTO – nicht als Vorschlag ins Feld schreiben.
+        auto_for_fields = {k: v for k, v in auto.items() if k != CONF_BATTERY_CAPACITY_KWH}
+        suggested = {**auto_for_fields, **self._options}
+        schema = self.add_suggested_values_to_schema(STEP_SYSTEM_SCHEMA, suggested)
+        return self.async_show_form(
+            step_id="system",
+            data_schema=schema,
+            description_placeholders={
+                "detected_count": str(len(auto)),
+                "detected_list": _format_system_detection(auto),
+            },
+        )
 
     async def async_step_season(self, user_input: dict[str, Any] | None = None) -> dict[str, Any]:
         if user_input is not None:
@@ -765,13 +1082,27 @@ class E3DCMaestroOptionsFlow(_TariffSlotsMixin, OptionsFlow):
         if user_input is not None:
             self._options.update(user_input)
             return await self.async_step_evcc()
-        return self.async_show_form(step_id="wallbox", data_schema=self._prefilled(STEP_WALLBOX_SCHEMA))
+        auto = _autodetect_rscp_sources(self.hass)
+        wb_keys = {
+            CONF_WALLBOX_TYPE,
+            CONF_WALLBOX_PROVIDER,
+            CONF_WALLBOX_POWER_SENSOR,
+            CONF_WALLBOX_INCLUDED_IN_HOUSE,
+        }
+        suggested = {k: v for k, v in auto.items() if k in wb_keys}
+        # Bestehende Optionen überschreiben Auto-Detect.
+        suggested.update({k: v for k, v in self._options.items() if k in wb_keys})
+        schema = self.add_suggested_values_to_schema(STEP_WALLBOX_SCHEMA, suggested)
+        return self.async_show_form(step_id="wallbox", data_schema=schema)
 
     async def async_step_evcc(self, user_input: dict[str, Any] | None = None) -> dict[str, Any]:
         if user_input is not None:
             self._options.update(user_input)
             return await self.async_step_heatpump()
-        return self.async_show_form(step_id="evcc", data_schema=self._prefilled(STEP_EVCC_SCHEMA))
+        auto = _autodetect_evcc(self.hass)
+        suggested = {**auto, **self._options}
+        schema = self.add_suggested_values_to_schema(STEP_EVCC_SCHEMA, suggested)
+        return self.async_show_form(step_id="evcc", data_schema=schema)
 
     async def async_step_heatpump(self, user_input: dict[str, Any] | None = None) -> dict[str, Any]:
         if user_input is not None:

@@ -37,6 +37,7 @@ from .const import (
     CONF_EVCC_MODE_ENTITY,
     CONF_EVCC_NOW_VALUE,
     CONF_GRID_POWER_SENSOR,
+    CONF_GRID_POWER_INVERT,
     CONF_HP_ENABLED,
     CONF_HP_MIN_PAUSE_MINUTES,
     CONF_HP_MIN_RUN_MINUTES,
@@ -54,7 +55,9 @@ from .const import (
     CONF_TARIFF_SLOTS,
     CONF_UPDATE_INTERVAL,
     CONF_WALLBOX_ENABLED,
+    CONF_WALLBOX_INCLUDED_IN_HOUSE,
     CONF_WALLBOX_MAX_CURRENT,
+    CONF_WALLBOX_POWER_SENSOR,
     CONF_WALLBOX_SERVICE_OFF,
     CONF_WALLBOX_SERVICE_ON,
     CONF_WALLBOX_TYPE,
@@ -64,6 +67,7 @@ from .const import (
     DATA_HOUSE_POWER,
     DATA_PV_POWER,
     DATA_SOC,
+    DATA_WALLBOX_POWER,
     DEFAULT_CURTAILMENT_ACTIVATION_W,
     DEFAULT_CURTAILMENT_RELEASE_W,
     DEFAULT_UPDATE_INTERVAL,
@@ -108,6 +112,7 @@ from .const import (
     STAT_PV_SELF_CONSUMPTION_TODAY,
     STAT_PV_SAVINGS_TODAY_EUR,
     STAT_BATTERY_WEAR_TODAY_EUR,
+    STAT_WALLBOX_ENERGY_TODAY,
     WALLBOX_TYPE_E3DC,
 )
 from .control_engine import (
@@ -288,6 +293,7 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             STAT_PV_SELF_CONSUMPTION_TODAY: 0.0,
             STAT_PV_SAVINGS_TODAY_EUR: 0.0,
             STAT_BATTERY_WEAR_TODAY_EUR: 0.0,
+            STAT_WALLBOX_ENERGY_TODAY: 0.0,
         }
         self._last_stats_date: str | None = None
         # Persistence: store stats in HA's .storage so a restart preserves
@@ -324,6 +330,8 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # A3: EWMA-geglättete Leistungswerte (anti-flapping)
         self._ewma_pv: float | None = None
         self._ewma_house: float | None = None
+        # Wallbox-Leistung separat geglättet (W); 0 wenn kein Sensor konfiguriert
+        self._ewma_wallbox: float | None = None
 
         # Anti-Pendel-Cooldown: Zeitpunkt des letzten Phasenwechsels
         self._last_phase_changed_at: datetime | None = None
@@ -378,6 +386,7 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # persist from when the rule was off.
             self._ewma_pv = None
             self._ewma_house = None
+            self._ewma_wallbox = None
             self._last_phase_changed_at = None
             # Force a fresh decide+act cycle so any new phase
             # (e.g. CURTAILMENT_GUARD) is applied without waiting for the next poll.
@@ -497,10 +506,15 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._ewma_house, state_data.house_power or 0.0,
             EWMA_TAU_S, _dt_s, EWMA_JUMP_THRESHOLD_W,
         )
+        self._ewma_wallbox = _ewma_update(
+            self._ewma_wallbox, state_data.wallbox_power or 0.0,
+            EWMA_TAU_S, _dt_s, EWMA_JUMP_THRESHOLD_W,
+        )
         state_data = _dc.replace(
             state_data,
             pv_power=self._ewma_pv,
             house_power=self._ewma_house,
+            wallbox_power=self._ewma_wallbox or 0.0,
         )
 
         # Current electricity price (optional)
@@ -694,6 +708,11 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Throughput = |Akku-Leistung| für Wear-Cost-Berechnung.
         throughput_kwh = abs(state_data.battery_power) / 1000 * interval_h_g
         self.stats[STAT_BATTERY_THROUGHPUT_TODAY] += throughput_kwh
+        # Wallbox-Energie heute (kWh) – getrennter Verbrauchszähler
+        if state_data.wallbox_power > 0:
+            self.stats[STAT_WALLBOX_ENERGY_TODAY] += (
+                state_data.wallbox_power / 1000 * interval_h_g
+            )
         # Wear cost: capex / (cycles × 2 × capacity_kwh) × throughput
         _cap = max(getattr(self._params, "battery_capacity_kwh", 10.0), 1.0)
         _cycles = max(getattr(self._params, "battery_total_cycles", 5000.0), 100.0)
@@ -1206,6 +1225,25 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             if cons_h is None and pv_h is None:
                 return  # No historical data yet
+            # Solcast/Forecast.Solar bevorzugen — sonst zeigt die UI-Trajektorie
+            # einen 90-Tage-Mittel-Tag statt der echten Tagesprognose, was nachts
+            # zu einem fälschlich abfallenden SoC bis ~25 % führt, obwohl der
+            # Optimizer (der dieselbe Solcast-Quelle nutzt) korrekt rechnet.
+            #
+            # Auswahl des Solcast-Tags: ``_read_pv_forecast_profile(days_ahead=N)``
+            # liefert das Tagesprofil für ``(now + N).date()``. Die UI-Trajektorie
+            # deckt aber das 24h-Sliding-Window ab ``now`` ab. Wir wählen daher
+            # den Tag, der den Großteil dieser 24h abdeckt:
+            #   * vor 12:00 lokal → Großteil ist HEUTE (days_ahead=0)
+            #   * ab 12:00 lokal → Großteil ist MORGEN (days_ahead=1)
+            # Damit verschwindet der Fehler, dass nachts (z. B. 00:30 lokal)
+            # bisher das Profil von morgen geladen wurde, obwohl die nächsten
+            # 24 h fast vollständig im heutigen Kalendertag liegen.
+            now_local = dt_util.as_local(now)
+            target_days_ahead = 0 if now_local.hour < 12 else 1
+            pv_h_forecast = self._read_pv_forecast_profile(now, days_ahead=target_days_ahead)
+            if pv_h_forecast is not None:
+                pv_h = pv_h_forecast
             self.forecast = simulate_next_24h(
                 soc=state.soc,
                 consumption_h=cons_h if cons_h is not None else [state.house_power] * 24,
@@ -1433,7 +1471,20 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 opts[CONF_ADDITIONAL_GENERATION_SENSOR], required=False
             ) or 0.0
         house = self._read_power_w(opts[CONF_HOUSE_POWER_SENSOR], required=True)
+        # Wallbox-Verbrauch separat (optional). Wenn der Hausverbrauchszähler die
+        # Wallbox bereits enthält (typisch openWB am EVU-Zähler), ziehen wir sie
+        # ab, damit die Optimierungs-Logik einen "reinen" Hausverbrauch sieht.
+        wallbox = 0.0
+        wb_sensor = opts.get(CONF_WALLBOX_POWER_SENSOR)
+        if wb_sensor:
+            wb_val = self._read_power_w(wb_sensor, required=False)
+            if wb_val is not None:
+                wallbox = max(0.0, wb_val)
+                if opts.get(CONF_WALLBOX_INCLUDED_IN_HOUSE, False) and house is not None:
+                    house = max(0.0, house - wallbox)
         grid = self._read_power_w(opts[CONF_GRID_POWER_SENSOR], required=True)
+        if grid is not None and opts.get(CONF_GRID_POWER_INVERT, False):
+            grid = -grid
         batt = self._read_power_w(opts[CONF_BATTERY_POWER_SENSOR], required=True)
         forecast: float | None = None
         if opts.get(CONF_PV_FORECAST_ENABLED) and opts.get(CONF_PV_FORECAST_SENSOR):
@@ -1472,6 +1523,7 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             grid_power=grid,
             battery_power=batt,
             pv_forecast_remaining_kwh=forecast,
+            wallbox_power=wallbox,
             evcc_charging=evcc_charging,
             evcc_mode=evcc_mode,
             tomorrow_pv_kwh=tomorrow_pv,
@@ -1687,10 +1739,14 @@ class E3DCMaestroCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     return profile
 
         # 2. Auto-detect: scan all sensor.* states for one with detailedHourly/forecast/watt_hours
-        # Only for days_ahead=1 — for day-2 we require the configured sensor to provide the data
-        # explicitly, otherwise integrations like Solcast (which auto-creates prognose_tag_3..7)
-        # would silently extend the horizon to 48 h without the user's awareness.
-        if days_ahead != 1:
+        # Erlaubt für days_ahead 0 (heute) und 1 (morgen) — bei Solcast existiert
+        # ``prognose_heute`` als zweiter Sensor mit detailedHourly für den
+        # aktuellen Tag, der UI-Forecast braucht den, wenn ``CONF_PV_FORECAST_SENSOR``
+        # auf den Morgen-Sensor zeigt.
+        # Für day-2 bleibt der Auto-Detect deaktiviert: integrationen wie Solcast
+        # legen `prognose_tag_3..7` automatisch an, was sonst stillschweigend zu
+        # einem 48h-Horizont führen würde.
+        if days_ahead > 1:
             return None
         for state in self.hass.states.async_all("sensor"):
             attrs = state.attributes

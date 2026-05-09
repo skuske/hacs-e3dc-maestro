@@ -49,7 +49,7 @@ E3DC Maestro runs entirely **local and without any cloud connection**. It extend
 | **Peak-tariff (HT) protection** | Blocks discharge during configured high-tariff hours |
 | **PV forecast delay** | Delays corridor charging when Solcast/Forecast.Solar predicts enough PV |
 | **Forward-looking charging** | Raises today's charge target when tomorrow's PV is expected to be low |
-| **Spreading (charge distribution)** | Spreads PV surplus evenly across the remaining charge window |
+| **Spreading (charge distribution)** | Spreads PV surplus evenly across the remaining charge window – **default ON since v0.3.1** (hardware protection against 0/max-power bursts) |
 | **Morning pre-discharge** | Discharges the battery in the morning to free up capacity for daytime PV |
 | **Astro mode** | Dynamically links charge end / charge start to sunset / sunrise |
 | **Morning cap** | SoC ceiling in the morning so the battery doesn't fill up too early |
@@ -188,6 +188,13 @@ The setup wizard has **9 steps**. All parameters can be changed at any time unde
 
 Maps Maestro to the sensor entities from `e3dc_rscp` (or Modbus).
 
+> **✨ Auto-detection:** If `e3dc_rscp` is installed, Maestro pre-fills all sensors
+> (SoC, PV, house, grid, battery, wallbox consumption) and inverts the grid sign for
+> `_transfer_to_from_grid` automatically. An **openWB** wallbox is detected via
+> `sensor.openwb_chargepoint*_ladeleistung`, and an existing **EVCC integration**
+> ([marq24/ha-evcc](https://github.com/marq24/ha-evcc), domain `evcc_intg`) is detected
+> as well. All suggestions can be overridden.
+
 | Field | Required | Typical Entity ID | Convention |
 |---|---|---|---|
 | **State of Charge (SoC)** | ✓ | `sensor.<devicename>_battery_rsoc` | 0–100 % |
@@ -289,16 +296,28 @@ Charges the battery from the grid when the spot electricity price is cheap.
 
 ### Step 7: Wallbox
 
-Controls wallbox charge current based on PV surplus.
+Controls wallbox charge current based on PV surplus **and/or** cleanly separates the
+wallbox consumption from the house load.
+
+#### House / wallbox load split (since v0.3.1)
+
+If you configure a **wallbox power sensor**, Maestro separates the EV charge load from
+the house load. EWMA smoothing, PV forecast and the optimizer are then **no longer
+distorted by EV charge spikes**. The split is independent of the “Wallbox control”
+switch — you can wire up the sensor purely for clean statistics.
 
 | Parameter | Default | Description |
 |---|---|---|
-| **Wallbox control** | off | |
-| **Wallbox type** | e3dc | `e3dc` = native E3DC wallbox (current limiting only); `generic` = EVCC / any wallbox |
+| **Wallbox control** | off | Enables current-limiting logic |
+| **Wallbox type** | e3dc | `e3dc` = native E3DC wallbox (RSCP service); `generic` = openWB / EVCC / any wallbox via custom services |
+| **Wallbox power sensor** | – | Wattage sensor of the wallbox (e.g. `sensor.<device>_wallbox_consumption` or `sensor.openwb_chargepoint_4_ladeleistung`). Auto-detected. |
+| **House meter already includes wallbox** | auto | `false` for native E3DC wallbox (separate power meter); `true` for openWB on the grid meter. If on, Maestro subtracts the wallbox value from the house power. |
 | **Min. current (A)** | 6 | IEC-61851 minimum |
 | **Max. current (A)** | 16 | Maximum allowed charge current |
 | **Phases** | 3 | 1 or 3 phases |
 | **Min. PV surplus (W)** | 1 400 | Wallbox activates only above this surplus |
+
+**New sensors:** `sensor.e3dc_maestro_wallbox_power` (W), `sensor.e3dc_maestro_total_load_power` (W = house + wallbox), `sensor.e3dc_maestro_wallbox_energy_today` (kWh, Energy-Dashboard compatible).
 
 ---
 
@@ -436,7 +455,7 @@ Alternatively via *Settings → Entities*: filter by "E3DC Maestro" + tick "Show
 | `switch.e3dc_maestro_korridor_pause_min_ladeleistung` | Corridor pause | Pauses charging when power would fall below the minimum |
 | `switch.e3dc_maestro_spat_ladung_two_tier` | Late charging (two-tier) | Second charge target in the evening |
 | `switch.e3dc_maestro_vorentladung_tibber_auto` | Pre-discharge Tibber auto | Automatic pre-discharge based on Tibber price |
-| `switch.e3dc_maestro_ladeverteilung_spreading` | Charge spreading | Spread PV surplus evenly |
+| `switch.e3dc_maestro_ladeverteilung_spreading` | Charge spreading | Spread PV surplus evenly (default ON since v0.3.1) |
 | `switch.e3dc_maestro_astro_modus_sonnenuberwachung` | Astro mode | Link charge end/start to sun position |
 | `switch.e3dc_maestro_morning_cap_soc_deckel_morgens` | Morning cap | Morning SoC ceiling active |
 | `switch.e3dc_maestro_schonladung_reduzierte_ladeleistung` | Gentle charging | Reduced charge power for battery health |
@@ -542,7 +561,7 @@ Maestro decides **every tick** (default: 30 s) in descending priority. The first
 | 12 | `hard_soc_limit` | SoC ≥ hard SoC limit | Block charging (1 W sentinel) |
 | 13 | `corridor` | SoC < daily target | Seasonal charging |
 | 14 | `pv_delay` | Corridor active but PV forecast sufficient | Wait for PV |
-| 15 | `spreading` | Corridor active + spreading enabled | Distribute charge power over time |
+| 15 | `spreading` | Corridor active + spreading enabled (default ON) | Distribute charge power over time, smooth charge curve |
 | 16 | `curtailment_guard` | Curtailment guard flag active | Hold minimum charge power |
 | 17 | `idle` | No action needed | clear_power_limits (E3DC takes over) |
 
@@ -765,7 +784,7 @@ For questions about commercial licensing or use cases that are not compatible wi
 | **HT/NT-Schutz** | Entladesperre während der Hochtarif-Zeit |
 | **PV-Prognose-Verzögerung** | Laden verzögern, wenn Solcast/Forecast.Solar ausreichend PV ankündigt |
 | **Vorausschauendes Laden** | Ladeziel für morgen erhöhen wenn wenig PV erwartet wird |
-| **Ladeverteilung (Spreading)** | PV-Überschuss gleichmäßig über die verbleibende Ladezeit verteilen |
+| **Ladeverteilung (Spreading)** | PV-Überschuss gleichmäßig über die verbleibende Ladezeit verteilen – **seit v0.3.1 standardmäßig aktiv** (Hardware-Schutz vor 0/max-Bursts) |
 | **Morgen-Vorentladung** | Akku morgens vorentladen um tagsüber mehr PV aufnehmen zu können |
 | **Astro-Modus** | Ladeende/Ladestart dynamisch an Sonnenuntergang/Sonnenaufgang koppeln |
 | **Morning-Cap** | SoC-Deckel morgens, damit der Akku nicht zu früh voll ist |
@@ -1181,7 +1200,7 @@ Alle Switches können im Dashboard, in Automationen und über die UI bedient wer
 | `switch.e3dc_maestro_korridor_pause_min_ladeleistung` | Korridor-Pause | Hält Ladung an wenn Leistung unter Min-Grenze fiele |
 | `switch.e3dc_maestro_spat_ladung_two_tier` | Spät-Ladung (Two-Tier) | Zweites Ladeziel am Abend |
 | `switch.e3dc_maestro_vorentladung_tibber_auto` | Vorentladung Tibber-Auto | Automatische Vorentladung basierend auf Tibber-Preis |
-| `switch.e3dc_maestro_ladeverteilung_spreading` | Ladeverteilung (Spreading) | PV-Überschuss gleichmäßig verteilen |
+| `switch.e3dc_maestro_ladeverteilung_spreading` | Ladeverteilung (Spreading) | PV-Überschuss gleichmäßig verteilen (Default ON seit v0.3.1) |
 | `switch.e3dc_maestro_astro_modus_sonnenuberwachung` | Astro-Modus | Ladeende/start an Sonne koppeln |
 | `switch.e3dc_maestro_morning_cap_soc_deckel_morgens` | Morning-Cap | SoC-Deckel morgens aktiv |
 | `switch.e3dc_maestro_schonladung_reduzierte_ladeleistung` | Schonladung | Reduzierte Ladeleistung für Akkuschonung |
@@ -1292,7 +1311,7 @@ Maestro entscheidet **jeden Tick** (Standard: 30 s) in absteigender Priorität. 
 | 12 | `hard_soc_limit` | SoC ≥ Hard-SoC-Limit | Laden blockieren (1 W Sentinel) |
 | 13 | `corridor` | SoC < Tagesziel | Saisonal laden |
 | 14 | `pv_delay` | Korridor aktiv, aber PV-Prognose ausreichend | Warten auf PV |
-| 15 | `spreading` | Korridor aktiv + Spreading ein | Ladeleistung zeitlich verteilen |
+| 15 | `spreading` | Korridor aktiv + Spreading ein (Default ON) | Ladeleistung zeitlich verteilen, sanfte Ladekurve |
 | 16 | `curtailment_guard` | Abregelschutz-Flag aktiv | Mindest-Ladeleistung halten |
 | 17 | `idle` | Kein Handlungsbedarf | clear_power_limits (E3DC übernimmt) |
 

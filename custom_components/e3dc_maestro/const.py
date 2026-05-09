@@ -27,6 +27,7 @@ CONF_PV_POWER_SENSOR = "pv_power_sensor"
 CONF_ADDITIONAL_GENERATION_SENSOR = "additional_generation_sensor"
 CONF_HOUSE_POWER_SENSOR = "house_power_sensor"
 CONF_GRID_POWER_SENSOR = "grid_power_sensor"          # positive = feed-in
+CONF_GRID_POWER_INVERT = "grid_power_invert"          # bool: True = invert sign (sensor liefert positiv = Bezug)
 CONF_BATTERY_POWER_SENSOR = "battery_power_sensor"    # positive = charging
 CONF_BATTERY_CHARGED_TODAY_SENSOR = "battery_charged_today_sensor"        # kWh, optional native daily counter
 CONF_BATTERY_DISCHARGED_TODAY_SENSOR = "battery_discharged_today_sensor"  # kWh, optional native daily counter
@@ -80,6 +81,13 @@ CONF_WALLBOX_MIN_CURRENT = "wallbox_min_current"      # A
 CONF_WALLBOX_MAX_CURRENT = "wallbox_max_current"      # A
 CONF_WALLBOX_PHASES = "wallbox_phases"                # 1 or 3
 CONF_WALLBOX_MIN_SURPLUS = "wallbox_min_surplus"      # W
+
+# Wallbox power source (separater Verbrauchszähler)
+# Trennt EV-Ladeverbrauch vom Hausverbrauch, damit Optimizer/EWMA/Forecast
+# nicht durch Ladespitzen verfälscht werden.
+CONF_WALLBOX_PROVIDER = "wallbox_provider"                  # none|e3dc|openwb|custom (UI-Hinweis)
+CONF_WALLBOX_POWER_SENSOR = "wallbox_power_sensor"          # entity_id, W
+CONF_WALLBOX_INCLUDED_IN_HOUSE = "wallbox_included_in_house"  # bool: True = Hausverbrauchszähler enthält Wallbox bereits
 
 # Config entry keys – heat pump (Step 7)
 CONF_HP_ENABLED = "hp_enabled"
@@ -179,6 +187,22 @@ CONF_WATCHDOG_TIMEOUT = "watchdog_timeout"            # minutes, 0 = disabled
 WALLBOX_TYPE_E3DC = "e3dc"
 WALLBOX_TYPE_GENERIC = "generic"
 
+# Wallbox power-source provider choices (UI-Hint, wirkt nur in config_flow)
+WALLBOX_PROVIDER_NONE = "none"
+WALLBOX_PROVIDER_E3DC = "e3dc"
+WALLBOX_PROVIDER_OPENWB = "openwb"
+WALLBOX_PROVIDER_CUSTOM = "custom"
+WALLBOX_PROVIDERS = [
+    WALLBOX_PROVIDER_NONE,
+    WALLBOX_PROVIDER_E3DC,
+    WALLBOX_PROVIDER_OPENWB,
+    WALLBOX_PROVIDER_CUSTOM,
+]
+DEFAULT_WALLBOX_PROVIDER = WALLBOX_PROVIDER_NONE
+# E3DC: eigener Powermeter → NICHT im Hausverbrauch enthalten (Default False)
+# openWB: hängt am EVU-Hauptzähler → Default True
+DEFAULT_WALLBOX_INCLUDED_IN_HOUSE = False
+
 # Control phases (states of the phase sensor)
 PHASE_OFF = "off"
 PHASE_MANUAL = "manual"
@@ -252,7 +276,7 @@ DEFAULT_CHEAP_THRESHOLD = 0.10
 DEFAULT_MAX_GRID_CHARGE_KWH = 3.0
 DEFAULT_WALLBOX_MIN_CURRENT = 6
 DEFAULT_WALLBOX_MAX_CURRENT = 16
-DEFAULT_WALLBOX_PHASES = 3
+DEFAULT_WALLBOX_PHASES = "3"  # SelectSelector erwartet str (options=["1","3"])
 DEFAULT_WALLBOX_MIN_SURPLUS = 1400
 DEFAULT_HP_MIN_SURPLUS = 2000
 DEFAULT_HP_MAX_PRICE = 0.15
@@ -367,6 +391,7 @@ DATA_PV_POWER = "pv_power"
 DATA_HOUSE_POWER = "house_power"
 DATA_GRID_POWER = "grid_power"
 DATA_BATTERY_POWER = "battery_power"
+DATA_WALLBOX_POWER = "wallbox_power"
 
 # Statistics keys
 STAT_CHARGED_TODAY = "charged_today_kwh"
@@ -386,3 +411,5 @@ STAT_FEED_IN_REVENUE_TODAY_EUR = "feed_in_revenue_today_eur"  # Einspeise-Erlös
 STAT_PV_SELF_CONSUMPTION_TODAY = "pv_self_consumption_today_kwh"  # PV direkt → Haus (kWh)
 STAT_PV_SAVINGS_TODAY_EUR = "pv_savings_today_eur"   # vermiedener Bezug durch PV (€)
 STAT_BATTERY_WEAR_TODAY_EUR = "battery_wear_today_eur"  # Akku-Verschleiß heute (€)
+# Wallbox-Energieverbrauch separat (kWh, total_increasing)
+STAT_WALLBOX_ENERGY_TODAY = "wallbox_energy_today_kwh"

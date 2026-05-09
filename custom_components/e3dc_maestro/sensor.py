@@ -415,6 +415,46 @@ SENSOR_DESCRIPTIONS: tuple[MaestroSensorDescription, ...] = (
             else None
         ),
     ),
+    # Wallbox / Verbrauchsaufteilung
+    MaestroSensorDescription(
+        key="wallbox_power",
+        name="Wallbox-Leistung",
+        icon="mdi:ev-station",
+        native_unit_of_measurement=UnitOfPower.WATT,
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda coord: (
+            round(coord.data["state"].wallbox_power, 1)
+            if coord.data and coord.data.get("state") is not None
+            else None
+        ),
+    ),
+    MaestroSensorDescription(
+        key="total_load_power",
+        name="Gesamtlast (Haus + Wallbox)",
+        icon="mdi:home-lightning-bolt",
+        native_unit_of_measurement=UnitOfPower.WATT,
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda coord: (
+            round(
+                (coord.data["state"].house_power or 0.0)
+                + (coord.data["state"].wallbox_power or 0.0),
+                1,
+            )
+            if coord.data and coord.data.get("state") is not None
+            else None
+        ),
+    ),
+    MaestroSensorDescription(
+        key="wallbox_energy_today",
+        name="Wallbox-Energie heute",
+        icon="mdi:ev-station",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        value_fn=lambda coord: round(coord.stats.get("wallbox_energy_today_kwh", 0.0), 3),
+    ),
 )
 
 

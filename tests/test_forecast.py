@@ -248,6 +248,10 @@ class TestPvForecastResolution:
             feed_in_limit_percent=70.0,  # → 13388 W feed-in cap
             charge_threshold=15.0,
             battery_capacity_kwh=15.0,
+            # Test scope: subhour-peak detection in curtailment estimator.
+            # Disable spreading (default-on since v0.3.2) so battery does not
+            # absorb the peak by smoothed pre-charging during the day.
+            spreading_enabled=False,
         )
 
     def test_hourly_profile_misses_subhour_peak(self):
