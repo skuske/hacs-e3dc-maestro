@@ -71,6 +71,43 @@ class TestSimulateNext24h:
         result = _simulate(soc=0.0, cons=2000.0, pv=0.0)
         assert result.grid_draw_kwh > 0.0
 
+    def test_grid_draw_accounted_after_soc_clamp_to_zero(self):
+        """Regression: When SoC starts >0 and drains to 0 mid-trajectory,
+        the post-clamp consumption must be charged to the grid. Prior to the
+        fix, the clamp dropped bat_net_w on the floor → grid_draw_kwh stayed
+        artificially low and self_sufficiency was reported as 100 %.
+        """
+        # charge_threshold=0 deaktiviert Emergency-Charge → Akku läuft
+        # tatsächlich auf 0 statt aus dem Grid nachzuladen.
+        params_no_emergency = MaestroParams(
+            inverter_power=12000,
+            max_charge_power=5000,
+            min_charge_power=300,
+            installed_kwp=10.0,
+            feed_in_limit_percent=70.0,
+            charge_threshold=0.0,
+            battery_capacity_kwh=10.0,
+        )
+        # 10 kWh battery, 2 kW load, 0 PV → battery empties in ~5 h, then 19 h
+        # of pure grid draw at 2 kW = 38 kWh.
+        result = simulate_next_24h(
+            soc=70.0,
+            consumption_h=[2000.0] * 24,
+            pv_h=[0.0] * 24,
+            params=params_no_emergency,
+            now=_NOW,
+            battery_capacity_kwh=10.0,
+        )
+        assert result.min_soc == 0.0, f"battery should drain to 0 ({result.min_soc=})"
+        # Expected post-clamp grid draw ≈ 19 h × 2 kW = 38 kWh; allow generous slack.
+        assert result.grid_draw_kwh > 30.0, (
+            f"grid_draw_kwh={result.grid_draw_kwh} too low – clamp leak regression"
+        )
+        assert result.self_sufficiency is not None
+        assert result.self_sufficiency < 0.5, (
+            f"self_sufficiency={result.self_sufficiency} – should reflect grid draw"
+        )
+
     def test_self_sufficiency_one_with_ample_pv(self):
         """Ample PV + starting SoC should give high self-sufficiency."""
         result = _simulate(soc=80.0, cons=300.0, pv=5000.0)

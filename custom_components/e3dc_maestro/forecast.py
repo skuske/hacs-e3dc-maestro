@@ -274,6 +274,12 @@ def simulate_next_24h(
             bat_net_w -= rejected_wh / _STEP_H  # adjust power for grid accounting
             current_soc = 100.0
         elif raw_soc < 0.0:
+            # Akku leer: die nicht aus dem Akku entnommene Energie muss
+            # aus dem Netz kommen. Ohne diese Korrektur würde grid_draw_wh
+            # auf 0 stehen, obwohl Hausverbrauch >0 ist (Self-Sufficiency
+            # wäre fälschlich 100%).
+            deficit_wh = (0.0 - raw_soc) / 100.0 * capacity_wh
+            bat_net_w += deficit_wh / _STEP_H  # bat_net_w war negativ → wird Richtung 0 korrigiert
             current_soc = 0.0
         else:
             current_soc = raw_soc

@@ -6,10 +6,13 @@ latitude-dependent). No fixed day-of-year constants.
 """
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, time
 from typing import Any
+
+_LOGGER = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1159,13 +1162,35 @@ def decide(
             # → Wechselrichter lädt mit voller PV-Überschussleistung statt
             # gleichmäßig über das Tagesfenster. Analog zur Korridor-Pause
             # weiter unten.
-            if (
+            _spreading_blocks_pv_delay = (
+                params.spreading_enabled and state.soc < BATTERY_FULL_SOC_CEILING
+            )
+            _pv_delay_gate_ok = (
                 state.pv_forecast_remaining_kwh >= min_required
                 and hour_now < charge_end_h
                 and state.soc >= params.delay_min_soc
                 and _pv_delay_cooldown_ok
-                and not (params.spreading_enabled and state.soc < BATTERY_FULL_SOC_CEILING)
-            ):
+                and not _spreading_blocks_pv_delay
+            )
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug(
+                    "[pv_delay-gate] would_trigger=%s pv_remain=%.1fkWh "
+                    "min_req=%.1fkWh hour=%.2f end=%.2f soc=%.1f%% "
+                    "floor=%.1f%% cooldown_ok=%s spreading_enabled=%s "
+                    "spread_blocks=%s ceiling=%.1f%%",
+                    _pv_delay_gate_ok,
+                    state.pv_forecast_remaining_kwh,
+                    min_required,
+                    hour_now,
+                    charge_end_h,
+                    state.soc,
+                    params.delay_min_soc,
+                    _pv_delay_cooldown_ok,
+                    params.spreading_enabled,
+                    _spreading_blocks_pv_delay,
+                    BATTERY_FULL_SOC_CEILING,
+                )
+            if _pv_delay_gate_ok:
                 floor_note = (
                     f", Floor {params.delay_min_soc:.0f}%"
                     if params.delay_min_soc > 0
