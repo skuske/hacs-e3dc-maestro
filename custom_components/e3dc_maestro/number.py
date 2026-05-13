@@ -68,6 +68,7 @@ from .const import (
     CONF_PV_FORECAST_THRESHOLD_KWH,
     CONF_PV_FORECAST_SAFETY_FACTOR,
     CONF_HARD_SOC_LIMIT,
+    CONF_FAST_CHARGE_FLOOR_SOC,
     CONF_FORWARD_LOOKING_MAX_SOC,
     CONF_EVCC_DISCHARGE_LIMIT_W,
     DOMAIN,
@@ -525,8 +526,16 @@ NUMBER_DESCRIPTIONS: tuple[MaestroNumberDescription, ...] = (
         device_class=NumberDeviceClass.BATTERY,
         param_key=CONF_HARD_SOC_LIMIT,
         min_value=50, max_value=100, step_value=1,
-    ),
-    # ── F1+: Forward-Looking (vorausschauende Ladung) ───────────────────────
+    ),    # ── Schnelllade-Boden ───────────────────────────────────────────────
+    MaestroNumberDescription(
+        key=CONF_FAST_CHARGE_FLOOR_SOC,
+        name="Schnelllade-Boden SoC",
+        icon="mdi:battery-charging-50",
+        native_unit_of_measurement=PERCENTAGE,
+        device_class=NumberDeviceClass.BATTERY,
+        param_key=CONF_FAST_CHARGE_FLOOR_SOC,
+        min_value=10, max_value=90, step_value=5,
+    ),    # ── F1+: Forward-Looking (vorausschauende Ladung) ───────────────────────
     MaestroNumberDescription(
         key=CONF_FORWARD_LOOKING_MAX_SOC,
         name="Vorausschauende Ladung Max-SoC",

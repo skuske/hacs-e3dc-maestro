@@ -285,6 +285,10 @@ class MaestroParams:
     # sonst abgeregelte PV-Leistung weiter in den Akku gepuffert werden kann).
     hard_soc_limit_enabled: bool = False
     hard_soc_limit: float = 80.0        # % SoC – harter Maximalwert
+    # Schnelllade-Boden: bis floor_soc mit vollem PV-Überschuss laden,
+    # danach startet die Tagesrampe vom Floor aus statt von 20 %.
+    fast_charge_floor_enabled: bool = False
+    fast_charge_floor_soc: float = 40.0  # % SoC – Schnelllade-Boden
     # F1+: Forward-Looking (vorausschauende Ladung)
     forward_looking_enabled: bool = False
     forward_looking_max_soc: float = 100.0
@@ -408,6 +412,9 @@ def target_soc_for_time(dt: datetime, params: MaestroParams) -> float:
     if hour_now >= charge_end_h:
         return params.charge_target
     morning_anchor = max(20.0, params.charge_threshold)
+    # Schnelllade-Boden: Rampe startet vom Floor-SoC statt von 20 %
+    if params.fast_charge_floor_enabled:
+        morning_anchor = max(morning_anchor, params.fast_charge_floor_soc)
     morning_hour = 6.0
     if hour_now <= morning_hour:
         return morning_anchor
@@ -881,6 +888,7 @@ def decide(
         PHASE_PV_DELAY,
         PHASE_RESERVE_PROTECTION,
         PHASE_SPREADING,
+        PHASE_FAST_FLOOR,
         POWER_MODE_CHARGE,
         POWER_MODE_DISCHARGE,
         POWER_MODE_IDLE,
@@ -1124,6 +1132,27 @@ def decide(
             power_mode=POWER_MODE_NORMAL,
             charge_power_limit=1,  # 1 W = effektiv keine Ladung
             target_soc=target,
+        )
+
+    # ── 6.95 Schnelllade-Boden ───────────────────────────────────────────
+    # Solange SoC < fast_charge_floor_soc: kein Korridor-Cap,
+    # charge_power_limit = max_charge_power → E3DC nutzt vollen PV-Überschuss.
+    # Curtailment Guard hat höhere Priorität (bereits vorab aktiv, falls nötig).
+    if (
+        params.fast_charge_floor_enabled
+        and state.soc < params.fast_charge_floor_soc
+        and not curtailment_guard_active
+    ):
+        return MaestroDecision(
+            phase=PHASE_FAST_FLOOR,
+            reason=(
+                f"Schnelllade-Boden: SoC {state.soc:.0f}\u202f% < "
+                f"Floor {params.fast_charge_floor_soc:.0f}\u202f% "
+                f"\u2192 voller PV-\u00dcberschuss"
+            ),
+            power_mode=POWER_MODE_NORMAL,
+            charge_power_limit=params.max_charge_power,
+            target_soc=params.fast_charge_floor_soc,
         )
 
     charge_power = desired_charge_power(state.soc, target, params, now)

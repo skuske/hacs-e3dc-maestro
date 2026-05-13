@@ -325,6 +325,8 @@
           "morning_discharge": "Morgen-Vorentladung",
           "astro_wait": "Astro-Modus: Warten auf Sonne",
           "morning_cap": "Morning-Cap (SoC-Deckel)",
+          "hard_soc_limit": "Hard-SoC-Limit aktiv",
+          "fast_floor": "Schnelllade-Boden",
           "idle": "Bereitschaft"
         }
       },
@@ -484,6 +486,9 @@
       },
       "auto_mode_enabled": {
         "name": "Auto-Optimierung"
+      },
+      "fast_charge_floor_enabled": {
+        "name": "Schnelllade-Boden"
       }
     },
     "select": {
@@ -542,6 +547,9 @@
       },
       "gentle_charge_factor": {
         "name": "Schonladung Faktor"
+      },
+      "fast_charge_floor_soc": {
+        "name": "Schnelllade-Boden SoC"
       }
     },
     "button": {

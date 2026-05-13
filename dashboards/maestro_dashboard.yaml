@@ -898,6 +898,16 @@ views:
             name: "Hard-SoC-Limit (Akku-Deckel) aktiv"
           - entity: number.e3dc_maestro_hard_soc_limit_akku_deckel
             name: "Hard-SoC-Limit (%)"
+          - entity: switch.e3dc_maestro_erweiterter_ladekorridor
+            name: "Erweiterter Ladekorridor (SoC-Delta → Leistung)"
+          - entity: number.e3dc_maestro_unterer_ladekorridor
+            name: "Unterer Ladekorridor (W)"
+          - entity: number.e3dc_maestro_oberer_ladekorridor
+            name: "Oberer Ladekorridor (W)"
+          - entity: switch.e3dc_maestro_schnelllade_boden
+            name: "Schnelllade-Boden aktiv"
+          - entity: number.e3dc_maestro_schnelllade_boden_soc
+            name: "Schnelllade-Boden SoC (%)"
           - entity: number.e3dc_maestro_ladeschwelle
             name: "Ladeschwelle / Notfall (%)"
           - entity: number.e3dc_maestro_ladeende_soc

@@ -12,8 +12,10 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     CONF_ADAPTIVE_RESERVE_ENABLED,
+    CONF_ADVANCED_CORRIDOR,
     CONF_CURTAILMENT_GUARD_ENABLED,
     CONF_EVCC_ENABLED,
+    CONF_FAST_CHARGE_FLOOR_ENABLED,
     CONF_HP_ENABLED,
     CONF_HT_ENABLED,
     CONF_HT_SAT,
@@ -150,6 +152,24 @@ SWITCH_DESCRIPTIONS: tuple[MaestroSwitchDescription, ...] = (
         param_key=CONF_LOWER_CORRIDOR_PAUSE_ENABLED,
         on_fn=lambda coord: coord.update_param(CONF_LOWER_CORRIDOR_PAUSE_ENABLED, True),
         off_fn=lambda coord: coord.update_param(CONF_LOWER_CORRIDOR_PAUSE_ENABLED, False),
+    ),
+    # Erweiterter Korridor: SoC-Delta → Leistung linear zw. unterem/oberem Korridor
+    MaestroSwitchDescription(
+        key=CONF_ADVANCED_CORRIDOR,
+        name="Erweiterter Ladekorridor",
+        icon="mdi:chart-sankey",
+        param_key=CONF_ADVANCED_CORRIDOR,
+        on_fn=lambda coord: coord.update_param(CONF_ADVANCED_CORRIDOR, True),
+        off_fn=lambda coord: coord.update_param(CONF_ADVANCED_CORRIDOR, False),
+    ),
+    # Schnelllade-Boden: bis floor_soc ohne Korridor-Cap mit vollem PV-Überschuss
+    MaestroSwitchDescription(
+        key=CONF_FAST_CHARGE_FLOOR_ENABLED,
+        name="Schnelllade-Boden",
+        icon="mdi:battery-charging-50",
+        param_key=CONF_FAST_CHARGE_FLOOR_ENABLED,
+        on_fn=lambda coord: coord.update_param(CONF_FAST_CHARGE_FLOOR_ENABLED, True),
+        off_fn=lambda coord: coord.update_param(CONF_FAST_CHARGE_FLOOR_ENABLED, False),
     ),
     # Phase 4: Two-Tier Ladeende
     MaestroSwitchDescription(

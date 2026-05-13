@@ -49,6 +49,8 @@ CONF_SUMMER_CHARGE_END = "summer_charge_end"          # fractional hour, e.g. 18
 CONF_ADVANCED_CORRIDOR = "advanced_corridor"          # bool, show advanced params
 CONF_LOWER_CORRIDOR = "lower_corridor"                # W
 CONF_UPPER_CORRIDOR = "upper_corridor"                # W
+CONF_FAST_CHARGE_FLOOR_ENABLED = "fast_charge_floor_enabled"  # bool
+CONF_FAST_CHARGE_FLOOR_SOC = "fast_charge_floor_soc"          # % SoC – Schnelllade-Boden
 
 # Config entry keys – HT/NT peak protection (Step 4)
 CONF_HT_ENABLED = "ht_enabled"
@@ -219,6 +221,7 @@ PHASE_CURTAILMENT_GUARD = "curtailment_guard"    # Abregelschutz aktiv (E3/Phase
 PHASE_ASTRO_WAIT = "astro_wait"                  # Warten auf Sonne (Phase 7)
 PHASE_MORNING_CAP = "morning_cap"                # F0: Morning-SoC-Cap aktiv
 PHASE_HARD_SOC_LIMIT = "hard_soc_limit"          # G0: Fester Max-SoC-Deckel (Akku-Schonung)
+PHASE_FAST_FLOOR = "fast_floor"                  # Schnelllade-Boden: voller PV-Überschuss bis Floor-SoC
 PHASE_FORCE_DISCHARGE = "force_discharge"        # manueller Schalter im Dashboard
 PHASE_IDLE = "idle"                              # kein Bedarf
 
@@ -250,6 +253,7 @@ ALL_PHASES = [
     PHASE_ASTRO_WAIT,
     PHASE_MORNING_CAP,
     PHASE_HARD_SOC_LIMIT,
+    PHASE_FAST_FLOOR,
     PHASE_CORRIDOR,
     PHASE_PV_DELAY,
     PHASE_SPREADING,
@@ -290,6 +294,8 @@ DEFAULT_PV_FORECAST_THRESHOLD_KWH = 5.0
 DEFAULT_BATTERY_CAPACITY_KWH = 10.0
 DEFAULT_PV_FORECAST_SAFETY_FACTOR = 1.2
 DEFAULT_DELAY_MIN_SOC = 0.0  # 0 = Floor deaktiviert (altes Verhalten)
+DEFAULT_FAST_CHARGE_FLOOR_ENABLED = False
+DEFAULT_FAST_CHARGE_FLOOR_SOC = 40.0
 DEFAULT_SOC_HYSTERESIS_PERCENT = 2.0
 DEFAULT_CHARGE_RAMP_W_PER_CYCLE = 200
 DEFAULT_RESERVE_WINTER_PERCENT = 30
