@@ -64,7 +64,8 @@ E3DC Maestro runs entirely **local and without any cloud connection**. It extend
 | **Control cockpit** | Live command centre with hero status, KPI tiles, active-now chips, 24 h phase history and "Why this decision?" |
 | **Decision explanation** | `decision_explanation` sensor with a full plain-text explanation for every phase |
 | **Anti-flapping** | EWMA smoothing of PV/load (τ = 60 s, jump-reset at 2 kW) + feed-in-limit hysteresis + pv-delay cooldown to prevent rapid phase oscillation |
-| **173 automated tests** | Control engine, forecast simulator and optimiser fully covered |
+| **Battery & PV Sizing Advisor (v0.3.7)** | 2D simulation (additional battery × additional PV) on historical hourly data — calculates savings, payback time, self-sufficiency and three recommendations (economic / technical / balanced) |
+| **287 automated tests** | Control engine, forecast simulator, optimiser and sizing advisor fully covered |
 
 ---
 
@@ -96,6 +97,12 @@ E3DC Maestro runs entirely **local and without any cloud connection**. It extend
 
 ### Tab 9 – Auto-Optimisation
 ![Auto-Optimisation](Screenshots/09_auto_optimierung.png)
+
+### Tab 10 – Battery & PV Sizing Advisor (v0.3.7)
+
+New tab: 2D historical simulation, scenario sliders (additional battery / PV),
+live KPIs (self-sufficiency, avoided grid import, savings, investment, payback),
+three recommendation strategies and editable cost inputs.
 
 ---
 
@@ -180,7 +187,13 @@ Settings → System → **Restart** (full restart, not just reload)
 
 ## Setup (Config Flow)
 
-The setup wizard has **9 steps**. All parameters can be changed at any time under **Settings → Devices & Services → E3DC Maestro → Configure** — no restart required.
+The setup wizard has **11 steps**. All parameters can be changed at any time under **Settings → Devices & Services → E3DC Maestro → Configure** — no restart required.
+
+> **Since v0.3.7:** the Configure dialog opens with a **central navigation menu**.
+> You can jump directly to any section (sources, system, season, tariff, wallbox,
+> heat pump, sizing advisor, …) instead of clicking through all steps in order.
+> After editing a section you return to the menu and can either edit another
+> section or close the dialog via **Save & Close**.
 
 ---
 
@@ -358,6 +371,52 @@ Switches the heat pump on when PV surplus is available.
 
 ---
 
+### Step 10: F0 / Gentle-Charge & F3 Auto-Mode
+
+Fine-tuning of the gentle-charge ramp and the auto-optimiser objective. Defaults
+are sensible — advanced tuning only.
+
+---
+
+### Step 11: Battery & PV Sizing Advisor (v0.3.7)
+
+The Sizing Advisor runs a **2D historical simulation** (additional battery
+× additional PV) on hourly energy data from the **HA Energy Dashboard** (Recorder
+long-term statistics, `statistics_during_period`). It calculates savings, payback
+time, self-sufficiency and three recommendations.
+
+> **✨ Auto-detection:** all energy sensors (PV, house, grid import/export,
+> battery charge/discharge, optional wallbox + heat pump) are pre-filled from the
+> HA Energy Dashboard. The PV slot accepts **multiple sensors** (multi-inverter
+> setups). RSCP sensors are used as fallback.
+
+| Parameter | Default | Range | Description |
+|---|---:|:---:|---|
+| Analysis period | 365 days | 30–730 | How many days of history to analyse |
+| Electricity price | 0.30 €/kWh | 0.05–2.00 | For savings calculation |
+| Feed-in tariff | 0.08 €/kWh | 0.00–1.00 | FiT revenue for avoided grid export |
+| Battery price | 600 €/kWh | 100–5 000 | Battery investment cost |
+| PV price | 1 200 €/kWp | 200–5 000 | PV expansion investment cost |
+| Inverter upgrade flat | 1 500 € | 0–20 000 | One-off cost for inverter replacement |
+| Round-trip efficiency | 92 % | 50–100 % | Battery charge/discharge round-trip |
+| Max. battery sweep | 30 kWh | 5–200 | Upper bound for battery sweep |
+| Battery step size | 2.5 kWh | 0.5–10 | Resolution along the battery axis |
+| Max. PV sweep | 20 kWp | 0–200 | Upper bound for PV sweep |
+| PV step size | 2.0 kWp | 0.5–10 | Resolution along the PV axis |
+
+The analysis is started via **Sizing Advisor → Start analysis** in the dashboard
+(button entity `button.e3dc_maestro_sizing_analyse_starten`). It runs in a thread
+pool (does not block the HA event loop). The result is persisted via `Store` and
+survives HA restarts.
+
+> **Scenario sliders:** the scenario explorer (sliders for additional battery /
+> PV) interpolates bilinearly inside the sweep matrix, so live updates are
+> CPU-free. The cost inputs (battery price, PV price, inverter upgrade, extra)
+> recalculate investment and payback **instantly** without re-running the
+> simulation.
+
+---
+
 ## Provided Entities
 
 All entities appear under the device **E3DC Maestro** in *Settings → Devices & Services → E3DC Maestro → Show device*.
@@ -392,6 +451,30 @@ All entities appear under the device **E3DC Maestro** in *Settings → Devices &
 | `sensor.e3dc_maestro_auto_geschatzte_einsparung` | Auto: Estimated savings | % | Simulated improvement vs. baseline |
 | `sensor.e3dc_maestro_aktives_lade_limit` | Active charge limit | W | Currently set charge limit (e.g. 0 W when blocked, 3000 W during curtailment guard); `unknown` if no limit active |
 | `sensor.e3dc_maestro_aktives_entlade_limit` | Active discharge limit | W | Currently set discharge limit (e.g. 0 W during EVCC pause); `unknown` if no limit active |
+
+#### Sizing Advisor sensors (v0.3.7)
+
+Static analysis results (filled after pressing **Start analysis**):
+
+| Entity ID | Name | Unit | Description |
+|---|---|---|---|
+| `sensor.e3dc_maestro_advisor_status` | Advisor status | – | `idle` / `running` / `ready` |
+| `sensor.e3dc_maestro_advisor_baseline_netzbezug` | Baseline grid import | kWh | Historic actual grid import (baseline scenario) |
+| `sensor.e3dc_maestro_advisor_empfehlung_wirtschaftlich` | Recommendation – economic | – | Combination with min. payback time (attributes: full breakdown) |
+| `sensor.e3dc_maestro_advisor_empfehlung_technisch` | Recommendation – technical | – | Combination with max. self-sufficiency |
+| `sensor.e3dc_maestro_advisor_empfehlung_ausgewogen` | Recommendation – balanced | – | Pareto-knee of cost/benefit curve |
+| `sensor.e3dc_maestro_advisor_anomalierate` | Anomaly rate | % | Share of hours with energy-balance anomalies (>5 % house load) |
+
+Scenario sensors (live, follow the two sliders):
+
+| Entity ID | Name | Unit | Description |
+|---|---|---|---|
+| `sensor.e3dc_maestro_advisor_autarkie` | Scenario self-sufficiency | % | For the current slider values |
+| `sensor.e3dc_maestro_advisor_vermiedener_netzbezug` | Avoided grid import (scenario) | kWh | Per year |
+| `sensor.e3dc_maestro_advisor_einsparung` | Annual savings (scenario) | EUR | Per year |
+| `sensor.e3dc_maestro_advisor_investition` | Investment (scenario) | EUR | Live from price entities |
+| `sensor.e3dc_maestro_advisor_amortisationszeit` | Payback time (scenario) | years | Live from price entities |
+| `sensor.e3dc_maestro_advisor_zyklen_pro_jahr` | Cycles per year (scenario) | – | Battery wear indicator |
 
 ---
 
@@ -433,6 +516,7 @@ Alternatively via *Settings → Entities*: filter by "E3DC Maestro" + tick "Show
 | `binary_sensor.e3dc_maestro_abregelschutz_aktiv` | Curtailment guard active | `curtailment_guard` phase active |
 | `binary_sensor.e3dc_maestro_ladesperre_aktiv` | Charge block active | `on` when Maestro has set a charge limit ≤ 0 W |
 | `binary_sensor.e3dc_maestro_entladesperre_aktiv` | Discharge block active | `on` when Maestro has set a discharge limit ≤ 0 W (e.g. during EVCC pause) |
+| `binary_sensor.e3dc_maestro_advisor_wr_upgrade_empfohlen` | Inverter upgrade recommended (Advisor) | `on` when the current slider scenario **or** the economic recommendation requires an inverter upgrade |
 
 ---
 
@@ -519,6 +603,17 @@ All Config Flow parameters are also available as Number entities and can be **ch
 | `number.e3dc_maestro_hard_soc_limit_akku_deckel` | Hard SoC limit | % |
 | `number.e3dc_maestro_vorausschauende_ladung_max_soc` | Forward-looking charge max SoC | % |
 
+#### Sizing Advisor numbers (v0.3.7)
+
+| Entity ID | Name | Unit |
+|---|---|---|
+| `number.e3dc_maestro_advisor_hypothetische_batteriekapazitat` | Hypothetical additional battery | kWh |
+| `number.e3dc_maestro_advisor_hypothetische_pv_erweiterung` | Hypothetical additional PV | kWp |
+| `number.e3dc_maestro_advisor_preis_akku_eur_kwh` | Battery price | €/kWh |
+| `number.e3dc_maestro_advisor_preis_pv_eur_kwp` | PV price | €/kWp |
+| `number.e3dc_maestro_advisor_preis_wr_upgrade_eur` | Inverter upgrade price | € |
+| `number.e3dc_maestro_advisor_zusatzkosten_eur_montage_nebenkosten` | Extra costs (installation, misc.) | € |
+
 ---
 
 ### Selects
@@ -538,6 +633,7 @@ All Config Flow parameters are also available as Number entities and can be **ch
 | `button.e3dc_maestro_limits_jetzt_freigeben` | Release limits now | Clears all active power limits (service `clear_power_limits`) |
 | `button.e3dc_maestro_manuell_laden_3_kwh` | Manual charge (3 kWh) | Triggers an immediate 3 kWh charge (rate-limited: max. once every 2 h) |
 | `button.e3dc_maestro_statistik_zurucksetzen` | Reset statistics | Resets all daily statistics (charged, discharged, PV loss) to 0 |
+| `button.e3dc_maestro_sizing_analyse_starten` | Start sizing analysis (v0.3.7) | Triggers the 2D sweep simulation in a background thread pool |
 
 ---
 
@@ -571,7 +667,7 @@ Maestro decides **every tick** (default: 30 s) in descending priority. The first
 
 ## Import Dashboard
 
-The included dashboard [`dashboards/maestro_dashboard.yaml`](dashboards/maestro_dashboard.yaml) provides **8 tabs** with a complete overview, controls and diagnostics.
+The included dashboard [`dashboards/maestro_dashboard.yaml`](dashboards/maestro_dashboard.yaml) provides **10 tabs** (incl. **Sizing Advisor** since v0.3.7) with a complete overview, controls, diagnostics and what-if analysis.
 
 ### Prerequisites
 
@@ -798,7 +894,8 @@ For questions about commercial licensing or use cases that are not compatible wi
 | **Erzwungene Entladung** | Dashboard-Schalter für manuelle Entladung, z. B. um vor einem Tibber-Niedrigpreisfenster Kapazität zu schaffen |
 | **Regelungs-Cockpit** | Live Command Center mit Hero-Status, KPI-Kacheln, „Aktiv jetzt"-Chips, 24 h Phasenverlauf und „Warum diese Entscheidung?" |
 | **Entscheidungs-Erklärung** | Sensor `decision_explanation` mit vollständigem deutschen Erklärungssatz pro Regelphase (alle 17 Phasen) |
-| **173 automatisierte Tests** | Control-Engine, Forecast-Simulator und Optimizer vollständig abgedeckt |
+| **Battery & PV Sizing Advisor (v0.3.7)** | 2D-Simulation (Zusatz-Akku × Zusatz-PV) auf historischen Stundendaten — berechnet Einsparung, Amortisation, Autarkie und drei Empfehlungen (wirtschaftlich / technisch / ausgewogen) |
+| **287 automatisierte Tests** | Control-Engine, Forecast-Simulator, Optimizer und Sizing Advisor vollständig abgedeckt |
 
 ---
 
@@ -830,6 +927,12 @@ For questions about commercial licensing or use cases that are not compatible wi
 
 ### Tab 9 – Auto-Optimierung
 ![Auto-Optimierung](Screenshots/09_auto_optimierung.png)
+
+### Tab 10 – Battery & PV Sizing Advisor (v0.3.7)
+
+Neuer Tab: 2D historische Simulation, Szenario-Slider (zusätzlicher Akku / PV),
+Live-KPIs (Autarkie, vermiedener Netzbezug, Einsparung, Investition, Amortisation),
+drei Empfehlungs-Strategien und editierbare Preisfelder.
 
 ---
 
@@ -914,7 +1017,14 @@ Einstellungen → System → **Neu starten** (kein Reload, echter Neustart)
 
 ## Einrichtung (Config Flow)
 
-Der Einrichtungsassistent führt durch **9 Schritte**. Alle Parameter können nachträglich jederzeit unter **Einstellungen → Geräte & Dienste → E3DC Maestro → Konfigurieren** geändert werden — ohne Neustart.
+Der Einrichtungsassistent führt durch **11 Schritte**. Alle Parameter können nachträglich jederzeit unter **Einstellungen → Geräte & Dienste → E3DC Maestro → Konfigurieren** geändert werden — ohne Neustart.
+
+> **Seit v0.3.7:** Der Konfigurieren-Dialog öffnet sich mit einem **zentralen
+> Navigations-Menü**. Du kannst direkt zu jedem Bereich springen (Quellen, System,
+> Saison, Tarif, Wallbox, Wärmepumpe, Sizing Advisor, …), statt dich linear durch
+> alle Schritte zu klicken. Nach dem Speichern eines Bereichs landest du wieder
+> im Menü und kannst entweder einen weiteren Bereich ändern oder den Dialog über
+> **Speichern & Schließen** beenden.
 
 ---
 
@@ -1099,6 +1209,52 @@ Schaltet die Wärmepumpe ein wenn PV-Überschuss vorhanden ist.
 
 ---
 
+### Schritt 10: F0 / Gentle-Charge & F3 Auto-Modus
+
+Feinjustierung der Gentle-Charge-Rampe und des Optimierungsziels der Auto-Optimierung.
+Die Defaults sind sinnvoll — nur fortgeschrittenes Tuning nötig.
+
+---
+
+### Schritt 11: Battery & PV Sizing Advisor (v0.3.7)
+
+Der Sizing Advisor führt eine **2D-historische Simulation** durch (zusätzlicher
+Akku × zusätzliche PV) auf stündlichen Energie-Daten aus dem **HA Energy
+Dashboard** (Recorder Long-Term Statistics, `statistics_during_period`). Berechnet
+werden Einsparung, Amortisation, Autarkie und drei Empfehlungen.
+
+> **✨ Auto-Detect:** alle Energie-Sensoren (PV, Haus, Netzbezug/-einspeisung,
+> Akku-Laden/-Entladen, optional Wallbox + Wärmepumpe) werden aus dem
+> HA-Energie-Dashboard übernommen. Der PV-Slot akzeptiert **mehrere Sensoren**
+> (Multi-Inverter-Setups). RSCP-Sensoren dienen als Fallback.
+
+| Parameter | Standard | Bereich | Beschreibung |
+|---|---:|:---:|---|
+| Analysezeitraum | 365 Tage | 30–730 | Wie viele Tage Verlaufs-Daten genutzt werden |
+| Strompreis | 0,30 €/kWh | 0,05–2,00 | Für die Ersparnis-Berechnung |
+| Einspeisevergütung | 0,08 €/kWh | 0,00–1,00 | FiT-Einnahmen bei vermiedener Netzeinspeisung |
+| Akku-Preis | 600 €/kWh | 100–5 000 | Investitionskosten Akku |
+| PV-Preis | 1 200 €/kWp | 200–5 000 | Investitionskosten PV-Erweiterung |
+| WR-Upgrade-Pauschale | 1 500 € | 0–20 000 | Einmalkosten WR-Tausch |
+| Wirkungsgrad (Round-Trip) | 92 % | 50–100 % | Akku-Lade-/Entladewirkungsgrad |
+| Max. Akku-Sweep | 30 kWh | 5–200 | Obergrenze Akku-Sweep |
+| Akku-Schrittweite | 2,5 kWh | 0,5–10 | Auflösung Akku-Achse |
+| Max. PV-Sweep | 20 kWp | 0–200 | Obergrenze PV-Sweep |
+| PV-Schrittweite | 2,0 kWp | 0,5–10 | Auflösung PV-Achse |
+
+Die Analyse wird im Dashboard über **Sizing Advisor → Analyse starten** gestartet
+(Button-Entity `button.e3dc_maestro_sizing_analyse_starten`). Sie läuft in einem
+Thread-Pool (blockiert den HA-Event-Loop nicht). Das Ergebnis wird via `Store`
+persistiert und überlebt HA-Neustarts.
+
+> **Szenario-Slider:** Der Szenario-Explorer (Slider für zusätzlichen Akku /
+> PV) interpoliert bilinear in der Sweep-Matrix — Live-Updates verursachen
+> keine CPU-Last. Die Preisfelder (Akku-Preis, PV-Preis, WR-Upgrade, Zusatz)
+> berechnen Investition und Amortisation **sofort** neu, ohne dass eine neue
+> Simulation läuft.
+
+---
+
 ## Bereitgestellte Entitäten
 
 Alle Entitäten erscheinen unter dem Gerät **E3DC Maestro** in *Einstellungen → Geräte & Dienste → E3DC Maestro → Gerät anzeigen*.
@@ -1135,6 +1291,30 @@ Diese Sensoren sind nach der Installation direkt sichtbar und nutzbar.
 | `sensor.e3dc_maestro_auto_geschatzte_einsparung` | Auto: Geschätzte Einsparung | % | Simulierte Verbesserung gegenüber Baseline |
 | `sensor.e3dc_maestro_aktives_lade_limit` | Aktives Lade-Limit | W | Aktuell von Maestro gesetztes Ladelimit (z. B. 0 W bei Ladesperre, 3000 W bei Curtailment Guard); `unknown` wenn kein Limit aktiv |
 | `sensor.e3dc_maestro_aktives_entlade_limit` | Aktives Entlade-Limit | W | Aktuell von Maestro gesetztes Entladelimit (z. B. 0 W bei EVCC-Pause); `unknown` wenn kein Limit aktiv |
+
+#### Sizing-Advisor-Sensoren (v0.3.7)
+
+Statische Analyseergebnisse (gefüllt nach „Analyse starten“):
+
+| Entity-ID | Name | Einheit | Beschreibung |
+|---|---|---|---|
+| `sensor.e3dc_maestro_advisor_status` | Advisor-Status | – | `idle` / `running` / `ready` |
+| `sensor.e3dc_maestro_advisor_baseline_netzbezug` | Baseline-Netzbezug | kWh | Historischer Ist-Netzbezug (Basis-Szenario) |
+| `sensor.e3dc_maestro_advisor_empfehlung_wirtschaftlich` | Empfehlung wirtschaftlich | – | Kombination mit minimaler Amortisationszeit (Details als Attribute) |
+| `sensor.e3dc_maestro_advisor_empfehlung_technisch` | Empfehlung technisch | – | Kombination mit maximaler Autarkie |
+| `sensor.e3dc_maestro_advisor_empfehlung_ausgewogen` | Empfehlung ausgewogen | – | Pareto-Knie der Kosten/Nutzen-Kurve |
+| `sensor.e3dc_maestro_advisor_anomalierate` | Anomalierate | % | Anteil Stunden mit Energiebilanz-Anomalien (>5 % Hauslast) |
+
+Szenario-Sensoren (live, folgen den beiden Slidern):
+
+| Entity-ID | Name | Einheit | Beschreibung |
+|---|---|---|---|
+| `sensor.e3dc_maestro_advisor_autarkie` | Szenario-Autarkie | % | Für die aktuellen Slider-Werte |
+| `sensor.e3dc_maestro_advisor_vermiedener_netzbezug` | Vermiedener Netzbezug (Szenario) | kWh | Pro Jahr |
+| `sensor.e3dc_maestro_advisor_einsparung` | Jahreseinsparung (Szenario) | EUR | Pro Jahr |
+| `sensor.e3dc_maestro_advisor_investition` | Investition (Szenario) | EUR | Live aus den Preisfeldern |
+| `sensor.e3dc_maestro_advisor_amortisationszeit` | Amortisationszeit (Szenario) | Jahre | Live aus den Preisfeldern |
+| `sensor.e3dc_maestro_advisor_zyklen_pro_jahr` | Zyklen pro Jahr (Szenario) | – | Verschleiß-Indikator |
 
 ---
 
@@ -1176,6 +1356,7 @@ Alternativ über *Einstellungen → Entitäten* suchen: Filter auf „E3DC Maest
 | `binary_sensor.e3dc_maestro_abregelschutz_aktiv` | Abregelschutz aktiv | Phase `curtailment_guard` aktiv |
 | `binary_sensor.e3dc_maestro_ladesperre_aktiv` | Ladesperre aktiv | `on` wenn Maestro ein Ladelimit ≤ 0 W gesetzt hat (Akku wird nicht geladen) |
 | `binary_sensor.e3dc_maestro_entladesperre_aktiv` | Entladesperre aktiv | `on` wenn Maestro ein Entladelimit ≤ 0 W gesetzt hat (z. B. bei EVCC-Pause) |
+| `binary_sensor.e3dc_maestro_advisor_wr_upgrade_empfohlen` | WR-Upgrade empfohlen (Advisor) | `on` wenn das aktuelle Slider-Szenario **oder** die wirtschaftliche Empfehlung einen WR-Upgrade erfordert |
 
 ---
 
@@ -1263,6 +1444,17 @@ Alle Parameter des Config Flow sind auch als Number-Entitäten verfügbar und k�
 | `number.e3dc_maestro_hard_soc_limit_akku_deckel` | Hard-SoC-Limit | % |
 | `number.e3dc_maestro_vorausschauende_ladung_max_soc` | Vorausschauende Ladung Max-SoC | % |
 
+#### Sizing-Advisor-Numbers (v0.3.7)
+
+| Entity-ID | Name | Einheit |
+|---|---|---|
+| `number.e3dc_maestro_advisor_hypothetische_batteriekapazitat` | Hypothetische Zusatz-Batterie | kWh |
+| `number.e3dc_maestro_advisor_hypothetische_pv_erweiterung` | Hypothetische PV-Erweiterung | kWp |
+| `number.e3dc_maestro_advisor_preis_akku_eur_kwh` | Akku-Preis | €/kWh |
+| `number.e3dc_maestro_advisor_preis_pv_eur_kwp` | PV-Preis | €/kWp |
+| `number.e3dc_maestro_advisor_preis_wr_upgrade_eur` | WR-Upgrade-Pauschale | € |
+| `number.e3dc_maestro_advisor_zusatzkosten_eur_montage_nebenkosten` | Zusatzkosten (Montage, Nebenkosten) | € |
+
 ---
 
 ### Auswahlen (Selects)
@@ -1288,6 +1480,7 @@ Alle Parameter des Config Flow sind auch als Number-Entitäten verfügbar und k�
 | `button.e3dc_maestro_limits_jetzt_freigeben` | Limits jetzt freigeben | Setzt alle aktiven Leistungslimits zurück (Service `clear_power_limits`) |
 | `button.e3dc_maestro_manuell_laden_3_kwh` | Manuell laden (3 kWh) | Löst Sofortladung von 3 kWh aus (Rate-Limited: max. 1× alle 2 h) |
 | `button.e3dc_maestro_statistik_zurucksetzen` | Statistik zurücksetzen | Setzt alle Tagesstatistiken (geladen, entladen, PV-Verlust) auf 0 |
+| `button.e3dc_maestro_sizing_analyse_starten` | Sizing-Analyse starten (v0.3.7) | Löst die 2D-Sweep-Simulation in einem Hintergrund-Thread-Pool aus |
 
 ---
 
@@ -1321,7 +1514,7 @@ Maestro entscheidet **jeden Tick** (Standard: 30 s) in absteigender Priorität. 
 
 ## Dashboard importieren
 
-Das mitgelieferte Dashboard [`dashboards/maestro_dashboard.yaml`](dashboards/maestro_dashboard.yaml) bietet **8 Tabs** mit vollständiger Übersicht, Steuerung und Diagnose.
+Das mitgelieferte Dashboard [`dashboards/maestro_dashboard.yaml`](dashboards/maestro_dashboard.yaml) bietet **10 Tabs** (inkl. **Sizing Advisor** seit v0.3.7) mit vollständiger Übersicht, Steuerung, Diagnose und What-If-Analyse.
 
 ### Voraussetzungen
 
